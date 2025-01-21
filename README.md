@@ -9,10 +9,10 @@ BBS Chat Bot is a Python application that functions as a BBS Teleconference Bot 
 - Enable "Mud Mode" to prepend "gos " to messages, useful for games where chatting is referred to as "Gossip".
 - Manage favorite BBS addresses with the ability to add and remove favorites.
 - Save and load favorite addresses from local storage.
-- Use `!search` for web searches.
-- Use `!chat` for ChatGPT requests.
-- Use `!weather` to fetch weather information.
-- Use `!yt` for YouTube searches.
+- Use `!search <keyword>` for web searches.
+- Use `!chat <query>` for ChatGPT requests.
+- Use `!weather <city or zip>` to fetch weather information.
+- Use `!yt <query>` for YouTube searches.
 - Use `!news <topic>` for news searches via newsapi.org.
 
 ## Requirements
