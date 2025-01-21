@@ -107,6 +107,9 @@
     <button id="toggleModeButton">Toggle Mode</button>
     <button id="favoritesButton">Favorites</button>
 
+    <!-- Host input field -->
+    <input type="text" id="hostInput" placeholder="Enter BBS Host">
+
     <!-- Favorites window -->
     <div id="favoritesWindow">
         <h2>Favorite BBS Addresses</h2>
@@ -116,6 +119,23 @@
         <button id="removeFavoriteButton">Remove</button>
         <button id="closeFavoritesButton">Close</button>
     </div>
+
+    <!-- Settings window -->
+    <div id="settingsWindow">
+        <!-- Add input fields for settings here -->
+        <input type="text" id="openaiApiKey" placeholder="OpenAI API Key">
+        <input type="text" id="weatherApiKey" placeholder="Weather API Key">
+        <input type="text" id="youtubeApiKey" placeholder="YouTube API Key">
+        <input type="text" id="googleCseApiKey" placeholder="Google CSE API Key">
+        <input type="text" id="googleCseCx" placeholder="Google CSE ID (cx)">
+        <input type="text" id="newsApiKey" placeholder="News API Key">
+        <input type="text" id="fontName" placeholder="Font Name">
+        <input type="text" id="fontSize" placeholder="Font Size">
+    </div>
+
+    <!-- BBS input field -->
+    <input type="text" id="inputBox" placeholder="Enter message">
+
     <!-- ...existing code... -->
     <script src="ui.js"></script>
 </body>

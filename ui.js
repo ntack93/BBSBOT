@@ -181,6 +181,7 @@ function updateFavoritesList(favorites) {
         listItem.addEventListener('click', function() {
             Array.from(favoritesList.children).forEach(item => item.classList.remove('selected'));
             listItem.classList.add('selected');
+            document.getElementById('hostInput').value = address; // Populate host name field
         });
         favoritesList.appendChild(listItem);
     });
@@ -234,6 +235,85 @@ document.getElementById('removeFavoriteButton').addEventListener('click', functi
         saveFavorites(favorites);
     }
 });
+
+// Function to create a custom context menu
+function createContextMenu(event, inputElement) {
+    event.preventDefault();
+
+    // Remove any existing context menu
+    const existingMenu = document.getElementById('contextMenu');
+    if (existingMenu) {
+        existingMenu.remove();
+    }
+
+    // Create the context menu
+    const menu = document.createElement('div');
+    menu.id = 'contextMenu';
+    menu.style.position = 'absolute';
+    menu.style.top = `${event.clientY}px`;
+    menu.style.left = `${event.clientX}px`;
+    menu.style.backgroundColor = '#fff';
+    menu.style.border = '1px solid #ccc';
+    menu.style.boxShadow = '0 0 10px rgba(0, 0, 0, 0.1)';
+    menu.style.zIndex = '1000';
+
+    // Add menu items
+    const cut = document.createElement('div');
+    cut.textContent = 'Cut';
+    cut.style.padding = '5px';
+    cut.style.cursor = 'pointer';
+    cut.addEventListener('click', () => {
+        document.execCommand('cut');
+        menu.remove();
+    });
+
+    const copy = document.createElement('div');
+    copy.textContent = 'Copy';
+    copy.style.padding = '5px';
+    copy.style.cursor = 'pointer';
+    copy.addEventListener('click', () => {
+        document.execCommand('copy');
+        menu.remove();
+    });
+
+    const paste = document.createElement('div');
+    paste.textContent = 'Paste';
+    paste.style.padding = '5px';
+    paste.style.cursor = 'pointer';
+    paste.addEventListener('click', () => {
+        document.execCommand('paste');
+        menu.remove();
+    });
+
+    menu.appendChild(cut);
+    menu.appendChild(copy);
+    menu.appendChild(paste);
+
+    document.body.appendChild(menu);
+
+    // Remove the context menu when clicking elsewhere
+    document.addEventListener('click', () => {
+        menu.remove();
+    }, { once: true });
+}
+
+// Add context menu event listeners to input fields
+document.querySelectorAll('input[type="text"]').forEach(input => {
+    input.addEventListener('contextmenu', (event) => createContextMenu(event, input));
+});
+
+// Add context menu event listeners to input fields in the Settings window
+document.addEventListener('DOMContentLoaded', () => {
+    document.querySelectorAll('#settingsWindow input[type="text"]').forEach(input => {
+        input.addEventListener('contextmenu', (event) => createContextMenu(event, input));
+    });
+});
+
+// Add context menu event listener to the BBS input field
+document.getElementById('hostInput').addEventListener('contextmenu', (event) => createContextMenu(event, event.target));
+
+// Add context menu event listener to the BBS input field
+document.getElementById('inputBox').addEventListener('contextmenu', (event) => createContextMenu(event, event.target));
 
 // ...existing code...
 >>>>>>> 125f854 (added Mud Mode button, keepalive logic)
