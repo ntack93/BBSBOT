@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 // ...existing code...
 
 // Function to load favorites from local storage
@@ -156,3 +157,83 @@ document.getElementById('hostInput').addEventListener('contextmenu', (event) => 
 document.getElementById('inputBox').addEventListener('contextmenu', (event) => createContextMenu(event, event.target));
 
 // ...existing code...
+=======
+// ...existing code...
+
+// Function to load favorites from local storage
+function loadFavorites() {
+    const storedFavorites = localStorage.getItem('favorites');
+    return storedFavorites ? JSON.parse(storedFavorites) : [];
+}
+
+// Function to save favorites to local storage
+function saveFavorites(favorites) {
+    localStorage.setItem('favorites', JSON.stringify(favorites));
+}
+
+// Function to update the favorites list
+function updateFavoritesList(favorites) {
+    const favoritesList = document.getElementById('favoritesList');
+    favoritesList.innerHTML = '';
+    favorites.forEach(function(address) {
+        const listItem = document.createElement('li');
+        listItem.textContent = address;
+        listItem.addEventListener('click', function() {
+            Array.from(favoritesList.children).forEach(item => item.classList.remove('selected'));
+            listItem.classList.add('selected');
+        });
+        favoritesList.appendChild(listItem);
+    });
+}
+
+let favorites = loadFavorites();
+
+document.getElementById('toggleModeButton').addEventListener('click', function() {
+    const currentMode = document.body.getAttribute('data-mode');
+    if (currentMode === 'ansi') {
+        document.body.setAttribute('data-mode', 'ripscript');
+        console.log('Switched to RIPscript graphics mode');
+    } else {
+        document.body.setAttribute('data-mode', 'ansi');
+        console.log('Switched to ANSI terminal emulation mode');
+    }
+});
+
+// Add event listener for the "Favorites" button
+document.getElementById('favoritesButton').addEventListener('click', function() {
+    const favoritesWindow = document.getElementById('favoritesWindow');
+    favoritesWindow.style.display = 'block';
+    updateFavoritesList(favorites);
+});
+
+// Add event listener for the "Close" button in the favorites window
+document.getElementById('closeFavoritesButton').addEventListener('click', function() {
+    const favoritesWindow = document.getElementById('favoritesWindow');
+    favoritesWindow.style.display = 'none';
+});
+
+// Function to add a new favorite address
+document.getElementById('addFavoriteButton').addEventListener('click', function() {
+    const newFavoriteInput = document.getElementById('newFavoriteInput');
+    const newAddress = newFavoriteInput.value.trim();
+    if (newAddress) {
+        favorites.push(newAddress);
+        updateFavoritesList(favorites);
+        saveFavorites(favorites);
+        newFavoriteInput.value = '';
+    }
+});
+
+// Function to remove the selected favorite address
+document.getElementById('removeFavoriteButton').addEventListener('click', function() {
+    const favoritesList = document.getElementById('favoritesList');
+    const selectedIndex = Array.from(favoritesList.children).findIndex(item => item.classList.contains('selected'));
+    if (selectedIndex !== -1) {
+        favorites.splice(selectedIndex, 1);
+        updateFavoritesList(favorites);
+        saveFavorites(favorites);
+    }
+});
+
+// ...existing code...
+>>>>>>> 125f854 (added Mud Mode button, keepalive logic)

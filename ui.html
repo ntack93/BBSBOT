@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -68,3 +69,55 @@
     <script src="ui.js"></script>
 </body>
 </html>
+=======
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <!-- ...existing code... -->
+    <style>
+        #favoritesWindow {
+            display: none;
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: white;
+            border: 1px solid #ccc;
+            padding: 20px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+        }
+        #favoritesWindow h2 {
+            margin-top: 0;
+        }
+        #favoritesWindow ul {
+            list-style-type: none;
+            padding: 0;
+        }
+        #favoritesWindow li {
+            padding: 5px;
+            cursor: pointer;
+        }
+        #favoritesWindow li.selected {
+            background-color: #ddd;
+        }
+    </style>
+</head>
+<body>
+    <!-- ...existing code... -->
+    <button id="toggleModeButton">Toggle Mode</button>
+    <button id="favoritesButton">Favorites</button>
+
+    <!-- Favorites window -->
+    <div id="favoritesWindow">
+        <h2>Favorite BBS Addresses</h2>
+        <ul id="favoritesList"></ul>
+        <input type="text" id="newFavoriteInput" placeholder="Enter new address">
+        <button id="addFavoriteButton">Add</button>
+        <button id="removeFavoriteButton">Remove</button>
+        <button id="closeFavoritesButton">Close</button>
+    </div>
+    <!-- ...existing code... -->
+    <script src="ui.js"></script>
+</body>
+</html>
+>>>>>>> 125f854 (added Mud Mode button, keepalive logic)
