@@ -8,6 +8,12 @@ import queue
 import re
 import requests
 import openai
+import json
+import os
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
 ###############################################################################
 # Default/placeholder API keys (updated in Settings window as needed).
@@ -55,6 +61,8 @@ class BBSBotApp:
 
         self.mud_mode = tk.BooleanVar(value=False)  # Mud Mode toggle variable
 
+        self.favorites = self.load_favorites()  # Load favorite BBS addresses
+
         # Build UI
         self.build_ui()
 
@@ -62,18 +70,9 @@ class BBSBotApp:
         self.master.after(100, self.process_incoming_messages)
 
         self.keep_alive_stop_event = threading.Event()
-
-    def keep_alive_task(self):
-        """Send a carriage return to the BBS every 60 seconds."""
-        while not self.keep_alive_stop_event.is_set():
-            if self.connected and self.writer:
-                try:
-                    self.writer.write("\r\n")
-                    asyncio.run_coroutine_threadsafe(self.writer.drain(), asyncio.get_event_loop())
-                    self.append_terminal_text("Sent keep-alive ping.\n", "normal")
-                except Exception as e:
-                    self.append_terminal_text(f"Keep-alive error: {e}\n", "normal")
-            time.sleep(60)  # Wait for 60 seconds
+        self.keep_alive_task = None
+        self.loop = asyncio.new_event_loop()  # Initialize loop attribute
+        asyncio.set_event_loop(self.loop)  # Set the event loop
 
     
         
@@ -102,6 +101,10 @@ class BBSBotApp:
         # Add a "Mud Mode" toggle button
         mud_mode_button = ttk.Checkbutton(config_frame, text="Mud Mode", variable=self.mud_mode)
         mud_mode_button.grid(row=0, column=6, padx=5, pady=5)
+
+        # Add a "Favorites" button
+        favorites_button = ttk.Button(config_frame, text="Favorites", command=self.show_favorites_window)
+        favorites_button.grid(row=0, column=7, padx=5, pady=5)
 
         # Add a toggle switch to switch between ANSI and RIPscript
         ttk.Label(config_frame, text="Terminal Mode:").grid(row=1, column=0, padx=5, pady=5, sticky=tk.E)
@@ -260,11 +263,13 @@ class BBSBotApp:
         self.stop_event.clear()
 
         def run_telnet():
-            asyncio.run(self.telnet_client_task(host, port))
+            asyncio.set_event_loop(self.loop)
+            self.loop.run_until_complete(self.telnet_client_task(host, port))
 
         thread = threading.Thread(target=run_telnet, daemon=True)
         thread.start()
         self.append_terminal_text(f"Connecting to {host}:{port}...\n", "normal")
+        self.start_keep_alive()  # Start keep-alive coroutine
 
     async def telnet_client_task(self, host, port):
         """Async function connecting via telnetlib3 (CP437 + ANSI), reading bigger chunks."""
@@ -304,6 +309,7 @@ class BBSBotApp:
             return
 
         self.stop_event.set()
+        self.stop_keep_alive()  # Stop keep-alive coroutine
         if self.writer:
             self.writer.close()
 
@@ -311,7 +317,11 @@ class BBSBotApp:
         self.connected = False
         self.reader = None
         self.writer = None
-        self.connect_button.config(text="Connect")
+        try:
+            if self.connect_button and self.connect_button.winfo_exists():
+                self.connect_button.config(text="Connect")
+        except tk.TclError:
+            logging.warning("Attempted to access connect_button after application was destroyed.")
         self.msg_queue.put_nowait("Disconnected from BBS.\n")
 
     def process_incoming_messages(self):
@@ -335,7 +345,7 @@ class BBSBotApp:
         for line in lines[:-1]:
             # Display each complete line
             self.append_terminal_text(line + "\n", "normal")
-            self.parse_incoming_triggers(line)
+            self.parse_incoming_triggers(line)  # Ensure triggers are parsed
 
         # The last piece may be partial if no trailing newline
         self.partial_line = lines[-1]
@@ -407,10 +417,12 @@ class BBSBotApp:
         user_input = self.input_var.get()
         self.input_var.set("")
         if user_input.strip():
-            if self.mud_mode.get():
-                user_input = "gos " + user_input
-            self.writer.write(user_input + "\r\n")
-            asyncio.run_coroutine_threadsafe(self.writer.drain(), asyncio.get_event_loop())
+            asyncio.run_coroutine_threadsafe(self._send_message(user_input), self.loop)
+
+    async def _send_message(self, message):
+        """Coroutine to send a message."""
+        self.writer.write(message + "\r\n")
+        await self.writer.drain()
 
     def update_terminal_mode(self):
         """Update the terminal mode based on the toggle switch."""
@@ -418,6 +430,80 @@ class BBSBotApp:
             self.terminal_mode.set("RIPscript")
         else:
             self.terminal_mode.set("ANSI")
+
+    def show_favorites_window(self):
+        """Open a Toplevel window to manage favorite BBS addresses."""
+        favorites_win = tk.Toplevel(self.master)
+        favorites_win.title("Favorite BBS Addresses")
+
+        row_index = 0
+
+        # Listbox to display favorite addresses
+        self.favorites_listbox = tk.Listbox(favorites_win, height=10, width=50)
+        self.favorites_listbox.grid(row=row_index, column=0, columnspan=2, padx=5, pady=5)
+        self.update_favorites_listbox()
+
+        row_index += 1
+
+        # Entry to add a new favorite address
+        self.new_favorite_var = tk.StringVar()
+        ttk.Entry(favorites_win, textvariable=self.new_favorite_var, width=40).grid(row=row_index, column=0, padx=5, pady=5)
+
+        # Button to add the new favorite address
+        add_button = ttk.Button(favorites_win, text="Add", command=self.add_favorite)
+        add_button.grid(row=row_index, column=1, padx=5, pady=5)
+
+        row_index += 1
+
+        # Button to remove the selected favorite address
+        remove_button = ttk.Button(favorites_win, text="Remove", command=self.remove_favorite)
+        remove_button.grid(row=row_index, column=0, columnspan=2, pady=5)
+
+        # Bind listbox selection to populate host field
+        self.favorites_listbox.bind("<<ListboxSelect>>", self.populate_host_field)
+
+    def update_favorites_listbox(self):
+        """Update the Listbox with the current favorite addresses."""
+        self.favorites_listbox.delete(0, tk.END)
+        for address in self.favorites:
+            self.favorites_listbox.insert(tk.END, address)
+
+    def add_favorite(self):
+        """Add a new favorite address."""
+        new_address = self.new_favorite_var.get().strip()
+        if new_address and new_address not in self.favorites:
+            self.favorites.append(new_address)
+            self.update_favorites_listbox()
+            self.new_favorite_var.set("")
+            self.save_favorites()
+
+    def remove_favorite(self):
+        """Remove the selected favorite address."""
+        selected_index = self.favorites_listbox.curselection()
+        if selected_index:
+            address = self.favorites_listbox.get(selected_index)
+            self.favorites.remove(address)
+            self.update_favorites_listbox()
+            self.save_favorites()
+
+    def load_favorites(self):
+        """Load favorite BBS addresses from a file."""
+        if os.path.exists("favorites.json"):
+            with open("favorites.json", "r") as file:
+                return json.load(file)
+        return []
+
+    def save_favorites(self):
+        """Save favorite BBS addresses to a file."""
+        with open("favorites.json", "w") as file:
+            json.dump(self.favorites, file)
+
+    def populate_host_field(self, event):
+        """Populate the host field with the selected favorite address."""
+        selected_index = self.favorites_listbox.curselection()
+        if selected_index:
+            address = self.favorites_listbox.get(selected_index)
+            self.host.set(address)
 
     ########################################################################
     #                           Trigger Parsing
@@ -451,8 +537,6 @@ class BBSBotApp:
     ########################################################################
     def handle_weather_command(self, location):
         """Fetch weather info in Fahrenheit with details (unlimited length)."""
-        if self.mud_mode.get():
-            location = "gos " + location
         key = self.weather_api_key.get()
         if not key:
             response = "Weather API key is missing."
@@ -490,8 +574,6 @@ class BBSBotApp:
     ########################################################################
     def handle_youtube_command(self, query):
         """Perform a YouTube search for the given query (unlimited length)."""
-        if self.mud_mode.get():
-            query = "gos " + query
         key = self.youtube_api_key.get()
         if not key:
             response = "YouTube API key is missing."
@@ -526,8 +608,6 @@ class BBSBotApp:
         """
         Perform a Google Custom Search (unlimited length) for better link display.
         """
-        if self.mud_mode.get():
-            query = "gos " + query
         cse_key = self.google_cse_api_key.get()
         cse_id = self.google_cse_cx.get()
         if not cse_key or not cse_id:
@@ -569,10 +649,8 @@ class BBSBotApp:
     def handle_chatgpt_command(self, user_text):
         """
         Send user_text to ChatGPT and handle responses.
-        The response can be longer than 250 characters but will be split into blocks.
+        The response can be longer than 200 characters but will be split into blocks.
         """
-        if self.mud_mode.get():
-            user_text = "gos " + user_text
         key = self.openai_api_key.get()
         if not key:
             gpt_response = "OpenAI API key is missing."
@@ -580,6 +658,19 @@ class BBSBotApp:
             return
 
         openai.api_key = key
+
+        # Determine the system message based on Mud Mode
+        if self.mud_mode.get():
+            system_message = (
+                "You are a helpful assistant. Respond concisely, responses should not exceed "
+                "200 characters in total. Ensure the response is a complete sentence."
+            )
+        else:
+            system_message = (
+                "You are a helpful assistant. Respond concisely, longer responses should split into "
+                "200-character blocks for display, but don't exceed 500 total characters in your responses."
+            )
+
         try:
             completion = openai.ChatCompletion.create(
                 model="gpt-4o-mini",
@@ -588,7 +679,7 @@ class BBSBotApp:
                 messages=[
                     {
                         "role": "system",
-                        "content": "You are a helpful assistant. Respond concisely, longer responses should split into 250-character blocks for display, but don't exceed 500 total characters in your responses."
+                        "content": system_message
                     },
                     {
                         "role": "user",
@@ -597,19 +688,61 @@ class BBSBotApp:
                 ]
             )
             gpt_response = completion.choices[0].message["content"]
+
+            # Truncate response to 200 characters if Mud Mode is enabled
+            if self.mud_mode.get():
+                gpt_response = gpt_response[:200].rsplit(' ', 1)[0]  # Ensure it doesn't cut off mid-word
+
         except Exception as e:
             gpt_response = f"Error with ChatGPT API: {str(e)}"
 
         # Send the full response to be chunked and transmitted
         self.send_full_message(gpt_response)
 
+    def send_full_message(self, message):
+        """
+        Sends the message to the BBS, ensuring no single block exceeds 200 characters.
+        Handles splitting and output flushing robustly.
+        """
+        if not self.connected or not self.writer:
+            return
+
+        # Define the BBS line length limit (200 chars)
+        max_line_length = 200
+
+        # Normalize whitespace and handle line breaks
+        message = re.sub(r"\s+", " ", message.strip())
+
+        # Process the message in chunks of 200 characters or fewer
+        while message:
+            # Take up to 200 characters
+            chunk = message[:max_line_length]
+
+            # Ensure chunks do not cut words in half
+            if len(message) > max_line_length and not chunk.endswith(" "):
+                last_space = chunk.rfind(" ")
+                if last_space != -1:
+                    chunk = chunk[:last_space]
+
+            # Prepare the remaining part of the message without strip()
+            message = message[len(chunk):]
+
+            # Prepend "gos" if Mud Mode is enabled and chunk is not empty
+            if self.mud_mode.get() and chunk.strip():
+                chunk = "gos " + chunk
+
+            # Skip sending if the chunk is empty or just "gos"
+            if chunk.strip() == "gos":
+                continue
+
+            # Send the current chunk
+            asyncio.run_coroutine_threadsafe(self._send_message(chunk), self.loop)
+
     ########################################################################
     #                           News
     ########################################################################
     def handle_news_command(self, topic):
         """Fetch top 2 news headlines based on the given topic."""
-        if self.mud_mode.get():
-            topic = "gos " + topic
         key = self.news_api_key.get()
         if not key:
             response = "News API key is missing."
@@ -639,43 +772,35 @@ class BBSBotApp:
 
         self.send_full_message(response)
 
-    def send_full_message(self, message):
-        """
-        Sends the message to the BBS, ensuring no single block exceeds 250 characters.
-        Handles splitting and output flushing robustly.
-        """
-        if not self.connected or not self.writer:
-            return
+    def update_terminal_mode(self):
+        """Update the terminal mode based on the toggle switch."""
+        if self.terminal_mode_toggle.instate(['selected']):
+            self.terminal_mode.set("RIPscript")
+        else:
+            self.terminal_mode.set("ANSI")
 
-        # Define the BBS line length limit (250 chars)
-        max_line_length = 250
+    ########################################################################
+    #                           Keep Alive
+    ########################################################################
+    async def keep_alive(self):
+        """Send an <ENTER> keystroke every 1 minute to keep the connection alive."""
+        while not self.keep_alive_stop_event.is_set():
+            if self.connected and self.writer:
+                self.writer.write("\r\n")
+                await self.writer.drain()
+            await asyncio.sleep(60)
 
-        # Normalize whitespace and handle line breaks
-        message = re.sub(r"\s+", " ", message.strip())
+    def start_keep_alive(self):
+        """Start the keep-alive coroutine."""
+        self.keep_alive_stop_event.clear()
+        if self.loop:
+            self.keep_alive_task = self.loop.create_task(self.keep_alive())
 
-        # Process the message in chunks of 250 characters or fewer
-        while message:
-            # Take up to 250 characters
-            chunk = message[:max_line_length]
-
-            # Ensure chunks do not cut words in half
-            if len(message) > max_line_length and not chunk.endswith(" "):
-                last_space = chunk.rfind(" ")
-                if last_space != -1:
-                    chunk = chunk[:last_space]
-
-            # Prepare the remaining part of the message without strip()
-            message = message[len(chunk):]
-
-            # Prepend 'gos ' if MUD mode is on
-            if self.mud_mode.get():
-                chunk = "gos " + chunk
-
-            # Send the current chunk
-            self.writer.write(chunk + "\r\n")
-
-            # Flush the writer to ensure the chunk is sent immediately
-            asyncio.run_coroutine_threadsafe(self.writer.drain(), asyncio.get_event_loop())
+    def stop_keep_alive(self):
+        """Stop the keep-alive coroutine."""
+        self.keep_alive_stop_event.set()
+        if self.keep_alive_task:
+            self.keep_alive_task.cancel()
 
 def main():
     try:
@@ -688,7 +813,8 @@ def main():
     finally:
         if app.connected:
             app.disconnect_from_bbs()
-        root.quit()
+        if root.winfo_exists():
+            root.quit()
 
 if __name__ == "__main__":
     main()
