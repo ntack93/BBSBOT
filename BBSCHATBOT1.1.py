@@ -10,10 +10,6 @@ import requests
 import openai
 import json
 import os
-import logging
-
-# Configure logging
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
 ###############################################################################
 # Default/placeholder API keys (updated in Settings window as needed).
@@ -39,12 +35,14 @@ class BBSBotApp:
         self.google_cse_api_key = tk.StringVar(value=DEFAULT_GOOGLE_CSE_KEY)
         self.google_cse_cx = tk.StringVar(value=DEFAULT_GOOGLE_CSE_CX)
         self.news_api_key = tk.StringVar(value=DEFAULT_NEWS_API_KEY)
+        self.nickname = tk.StringVar(value=self.load_nickname())
+        self.in_teleconference = False  # Flag to track teleconference state
 
         # For best ANSI alignment, recommend a CP437-friendly monospace font:
         self.font_name = tk.StringVar(value="Courier New") 
         self.font_size = tk.IntVar(value=10)
 
-        # Terminal mode (ANSI or RIPscript)
+        # Terminal mode (ANSI only)
         self.terminal_mode = tk.StringVar(value="ANSI")
 
         # Telnet references
@@ -62,6 +60,7 @@ class BBSBotApp:
         self.mud_mode = tk.BooleanVar(value=False)  # Mud Mode toggle variable
 
         self.favorites = self.load_favorites()  # Load favorite BBS addresses
+        self.favorites_window = None  # Track the Favorites window instance
 
         # Build UI
         self.build_ui()
@@ -105,11 +104,6 @@ class BBSBotApp:
         # Add a "Favorites" button
         favorites_button = ttk.Button(config_frame, text="Favorites", command=self.show_favorites_window)
         favorites_button.grid(row=0, column=7, padx=5, pady=5)
-
-        # Add a toggle switch to switch between ANSI and RIPscript
-        ttk.Label(config_frame, text="Terminal Mode:").grid(row=1, column=0, padx=5, pady=5, sticky=tk.E)
-        self.terminal_mode_toggle = ttk.Checkbutton(config_frame, text="RIPscript", command=self.update_terminal_mode)
-        self.terminal_mode_toggle.grid(row=1, column=1, padx=5, pady=5, sticky=tk.W)
 
         # ----- Terminal output -----
         terminal_frame = ttk.LabelFrame(main_frame, text="BBS Output")
@@ -185,7 +179,9 @@ class BBSBotApp:
 
         # ----- Font Name -----
         ttk.Label(settings_win, text="Font Name:").grid(row=row_index, column=0, padx=5, pady=5, sticky=tk.E)
-        ttk.Entry(settings_win, textvariable=self.font_name, width=30).grid(row=row_index, column=1, padx=5, pady=5, sticky=tk.W)
+        font_options = ["Courier New", "Px437 IBM VGA8", "Terminus (TTF)", "Consolas", "Lucida Console"]
+        font_dropdown = ttk.Combobox(settings_win, textvariable=self.font_name, values=font_options, state="readonly")
+        font_dropdown.grid(row=row_index, column=1, padx=5, pady=5, sticky=tk.W)
         row_index += 1
 
         # ----- Font Size -----
@@ -199,7 +195,7 @@ class BBSBotApp:
             text=(
                 "Tip: For best ANSI alignment, install a CP437-compatible\n"
                 "monospace font like 'Px437 IBM VGA8' or 'Terminus (TTF)'.\n"
-                "Then enter its exact name in the Font Name field."
+                "Then select its name from the Font Name dropdown."
             )
         )
         info_label.grid(row=row_index, column=0, columnspan=2, padx=5, pady=5, sticky=tk.W)
@@ -254,9 +250,14 @@ class BBSBotApp:
         if self.connected:
             self.disconnect_from_bbs()
         else:
-            self.connect_to_bbs()
+            self.start_connection()
 
-    def connect_to_bbs(self):
+    def connect_to_bbs(self, address):
+        """Connect to the BBS with the given address."""
+        self.host.set(address)
+        self.start_connection()
+
+    def start_connection(self):
         """Start the telnetlib3 client in a background thread."""
         host = self.host.get()
         port = self.port.get()
@@ -321,7 +322,7 @@ class BBSBotApp:
             if self.connect_button and self.connect_button.winfo_exists():
                 self.connect_button.config(text="Connect")
         except tk.TclError:
-            logging.warning("Attempted to access connect_button after application was destroyed.")
+            pass
         self.msg_queue.put_nowait("Disconnected from BBS.\n")
 
     def process_incoming_messages(self):
@@ -349,6 +350,33 @@ class BBSBotApp:
 
         # The last piece may be partial if no trailing newline
         self.partial_line = lines[-1]
+
+    def parse_incoming_triggers(self, line):
+        """
+        Check for commands in the given line: !weather, !yt, !search, !chat, !news, !help
+        """
+        # Remove ANSI codes for easier parsing
+        ansi_escape_regex = re.compile(r'\x1b\[(.*?)m')
+        clean_line = ansi_escape_regex.sub('', line)
+
+        # Check for trigger commands
+        if "!weather" in clean_line:
+            location = clean_line.split("!weather", 1)[1].strip()
+            self.handle_weather_command(location)
+        elif "!yt" in clean_line:
+            query = clean_line.split("!yt", 1)[1].strip()
+            self.handle_youtube_command(query)
+        elif "!search" in clean_line:
+            query = clean_line.split("!search", 1)[1].strip()
+            self.handle_web_search_command(query)
+        elif "!chat" in clean_line:
+            query = clean_line.split("!chat", 1)[1].strip()
+            self.handle_chatgpt_command(query)
+        elif "!news" in clean_line:
+            topic = clean_line.split("!news", 1)[1].strip()
+            self.handle_news_command(topic)
+        elif "!help" in clean_line:
+            self.handle_help_command()
 
     def append_terminal_text(self, text, default_tag="normal"):
         """Append text to the terminal display with ANSI parsing."""
@@ -424,22 +452,25 @@ class BBSBotApp:
         self.writer.write(message + "\r\n")
         await self.writer.drain()
 
-    def update_terminal_mode(self):
-        """Update the terminal mode based on the toggle switch."""
-        if self.terminal_mode_toggle.instate(['selected']):
-            self.terminal_mode.set("RIPscript")
-        else:
-            self.terminal_mode.set("ANSI")
+    def send_full_message(self, message):
+        """Send a full message to the terminal display and the BBS server."""
+        self.append_terminal_text(message + "\n", "normal")
+        if self.connected and self.writer:
+            asyncio.run_coroutine_threadsafe(self._send_message(message), self.loop)
 
     def show_favorites_window(self):
         """Open a Toplevel window to manage favorite BBS addresses."""
-        favorites_win = tk.Toplevel(self.master)
-        favorites_win.title("Favorite BBS Addresses")
+        if self.favorites_window and self.favorites_window.winfo_exists():
+            self.favorites_window.lift()
+            return
+
+        self.favorites_window = tk.Toplevel(self.master)
+        self.favorites_window.title("Favorite BBS Addresses")
 
         row_index = 0
 
         # Listbox to display favorite addresses
-        self.favorites_listbox = tk.Listbox(favorites_win, height=10, width=50)
+        self.favorites_listbox = tk.Listbox(self.favorites_window, height=10, width=50)
         self.favorites_listbox.grid(row=row_index, column=0, columnspan=2, padx=5, pady=5)
         self.update_favorites_listbox()
 
@@ -447,16 +478,16 @@ class BBSBotApp:
 
         # Entry to add a new favorite address
         self.new_favorite_var = tk.StringVar()
-        ttk.Entry(favorites_win, textvariable=self.new_favorite_var, width=40).grid(row=row_index, column=0, padx=5, pady=5)
+        ttk.Entry(self.favorites_window, textvariable=self.new_favorite_var, width=40).grid(row=row_index, column=0, padx=5, pady=5)
 
         # Button to add the new favorite address
-        add_button = ttk.Button(favorites_win, text="Add", command=self.add_favorite)
+        add_button = ttk.Button(self.favorites_window, text="Add", command=self.add_favorite)
         add_button.grid(row=row_index, column=1, padx=5, pady=5)
 
         row_index += 1
 
         # Button to remove the selected favorite address
-        remove_button = ttk.Button(favorites_win, text="Remove", command=self.remove_favorite)
+        remove_button = ttk.Button(self.favorites_window, text="Remove", command=self.remove_favorite)
         remove_button.grid(row=row_index, column=0, columnspan=2, pady=5)
 
         # Bind listbox selection to populate host field
@@ -505,17 +536,30 @@ class BBSBotApp:
             address = self.favorites_listbox.get(selected_index)
             self.host.set(address)
 
+    def load_nickname(self):
+        """Load nickname from a file."""
+        if os.path.exists("nickname.json"):
+            with open("nickname.json", "r") as file:
+                return json.load(file)
+        return ""
+
+    def save_nickname(self):
+        """Save nickname to a file."""
+        with open("nickname.json", "w") as file:
+            json.dump(self.nickname.get(), file)
+
     ########################################################################
     #                           Trigger Parsing
     ########################################################################
     def parse_incoming_triggers(self, line):
         """
-        Check for commands in the given line: !weather, !yt, !search, !chat, !news
+        Check for commands in the given line: !weather, !yt, !search, !chat, !news, !help
         """
         # Remove ANSI codes for easier parsing
         ansi_escape_regex = re.compile(r'\x1b\[(.*?)m')
         clean_line = ansi_escape_regex.sub('', line)
 
+        # Check for trigger commands
         if "!weather" in clean_line:
             location = clean_line.split("!weather", 1)[1].strip()
             self.handle_weather_command(location)
@@ -531,6 +575,29 @@ class BBSBotApp:
         elif "!news" in clean_line:
             topic = clean_line.split("!news", 1)[1].strip()
             self.handle_news_command(topic)
+        elif "!help" in clean_line:
+            self.handle_help_command()
+
+    ########################################################################
+    #                           Help
+    ########################################################################
+    def handle_help_command(self):
+        """Provide a list of available commands, adhering to character and chunk limits."""
+        help_message = (
+            "Available commands:\n"
+            "!weather <location> - Get weather information for a location.\n"
+            "!yt <query> - Search YouTube for a query.\n"
+            "!search <query> - Perform a Google search for a query.\n"
+            "!chat <message> - Chat with the bot using ChatGPT.\n"
+            "!news <topic> - Get top news headlines for a topic.\n"
+        )
+
+        # Split the help message into chunks
+        chunks = [help_message[i:i+200] for i in range(0, len(help_message), 200)]
+        for chunk in chunks:
+            self.append_terminal_text(chunk + "\n", "normal")
+            if self.connected and self.writer:
+                asyncio.run_coroutine_threadsafe(self._send_message(chunk), self.loop)
 
     ########################################################################
     #                           Weather
@@ -699,45 +766,6 @@ class BBSBotApp:
         # Send the full response to be chunked and transmitted
         self.send_full_message(gpt_response)
 
-    def send_full_message(self, message):
-        """
-        Sends the message to the BBS, ensuring no single block exceeds 200 characters.
-        Handles splitting and output flushing robustly.
-        """
-        if not self.connected or not self.writer:
-            return
-
-        # Define the BBS line length limit (200 chars)
-        max_line_length = 200
-
-        # Normalize whitespace and handle line breaks
-        message = re.sub(r"\s+", " ", message.strip())
-
-        # Process the message in chunks of 200 characters or fewer
-        while message:
-            # Take up to 200 characters
-            chunk = message[:max_line_length]
-
-            # Ensure chunks do not cut words in half
-            if len(message) > max_line_length and not chunk.endswith(" "):
-                last_space = chunk.rfind(" ")
-                if last_space != -1:
-                    chunk = chunk[:last_space]
-
-            # Prepare the remaining part of the message without strip()
-            message = message[len(chunk):]
-
-            # Prepend "gos" if Mud Mode is enabled and chunk is not empty
-            if self.mud_mode.get() and chunk.strip():
-                chunk = "gos " + chunk
-
-            # Skip sending if the chunk is empty or just "gos"
-            if chunk.strip() == "gos":
-                continue
-
-            # Send the current chunk
-            asyncio.run_coroutine_threadsafe(self._send_message(chunk), self.loop)
-
     ########################################################################
     #                           News
     ########################################################################
@@ -771,13 +799,6 @@ class BBSBotApp:
                 response = f"Error fetching news: {str(e)}"
 
         self.send_full_message(response)
-
-    def update_terminal_mode(self):
-        """Update the terminal mode based on the toggle switch."""
-        if self.terminal_mode_toggle.instate(['selected']):
-            self.terminal_mode.set("RIPscript")
-        else:
-            self.terminal_mode.set("ANSI")
 
     ########################################################################
     #                           Keep Alive
@@ -813,8 +834,11 @@ def main():
     finally:
         if app.connected:
             app.disconnect_from_bbs()
-        if root.winfo_exists():
-            root.quit()
+        try:
+            if root.winfo_exists():
+                root.quit()
+        except tk.TclError:
+            pass
 
 if __name__ == "__main__":
     main()
