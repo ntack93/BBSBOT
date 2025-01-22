@@ -45,6 +45,52 @@ BBS Chat Bot is a Python application that functions as a BBS Teleconference Bot.
     "your_password"
     ```
 
+## API Setup
+
+To use the various `!triggers` in the bot, you need to set up API keys for different services. Here is a high-level overview of how to obtain these keys:
+
+### OpenAI API Key
+
+1. Sign up for an account at [OpenAI](https://www.openai.com/).
+2. Navigate to the API section and generate a new API key.
+3. Copy the API key and enter it in the Settings window under "OpenAI API Key".
+
+### Weather API Key
+
+1. Sign up for an account at [OpenWeatherMap](https://openweathermap.org/).
+2. Navigate to the API section and generate a new API key.
+3. Copy the API key and enter it in the Settings window under "Weather API Key".
+
+### YouTube API Key
+
+1. Sign up for an account at [Google Cloud Platform](https://cloud.google.com/).
+2. Create a new project and enable the YouTube Data API v3.
+3. Generate an API key for the project.
+4. Copy the API key and enter it in the Settings window under "YouTube API Key".
+
+### Google Custom Search API Key and ID (cx)
+
+1. Sign up for an account at [Google Cloud Platform](https://cloud.google.com/).
+2. Create a new project and enable the Custom Search API.
+3. Generate an API key for the project.
+4. Go to the [Custom Search Engine](https://cse.google.com/cse/) and create a new search engine.
+5. Copy the Search Engine ID (cx) and the API key.
+6. Enter the API key in the Settings window under "Google CSE API Key".
+7. Enter the Search Engine ID (cx) in the Settings window under "Google CSE ID (cx)".
+
+### News API Key
+
+1. Sign up for an account at [NewsAPI](https://newsapi.org/).
+2. Navigate to the API section and generate a new API key.
+3. Copy the API key and enter it in the Settings window under "News API Key".
+
+### Google Places API Key
+
+1. Sign up for an account at [Google Cloud Platform](https://cloud.google.com/).
+2. Create a new project and enable the Places API.
+3. Generate an API key for the project.
+4. Copy the API key and enter it in the Settings window under "Google Places API Key".
+
 ## Usage
 
 1. Run the application:
