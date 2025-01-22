@@ -5,7 +5,7 @@ BBS Chat Bot is a Python application that functions as a BBS Teleconference Bot.
 ## Features
 
 - Connect to a BBS using a specified host and port.
-- Toggle between ANSI and RIPscript terminal emulation modes.
+- Toggle between ANSI and plain text terminal emulation modes.
 - Manage favorite BBS addresses with the ability to add and remove favorites.
 - Save and load favorite addresses from local storage.
 - Use `!search <keyword>` for web searches.
@@ -13,6 +13,7 @@ BBS Chat Bot is a Python application that functions as a BBS Teleconference Bot.
 - Use `!weather <city or zip>` to fetch weather information.
 - Use `!yt <query>` for YouTube searches.
 - Use `!news <topic>` for news searches via newsapi.org.
+- Use `!map <place>` to fetch place information from Google Places API.
 
 ## Requirements
 
@@ -53,7 +54,7 @@ BBS Chat Bot is a Python application that functions as a BBS Teleconference Bot.
 
 2. Use the GUI to enter the BBS host and port, then click "Connect" to establish a connection.
 
-3. Toggle between ANSI and RIPscript modes using the "Toggle Mode" button.
+3. Toggle between ANSI and plain text modes using the "Toggle Mode" button.
 
 4. Manage your favorite BBS addresses using the "Favorites" button. Add new addresses or remove existing ones.
 
@@ -64,6 +65,7 @@ BBS Chat Bot is a Python application that functions as a BBS Teleconference Bot.
     - **Google CSE API Key**: Required for the `!search` trigger to perform Google Custom Searches.
     - **Google CSE ID (cx)**: Required for the `!search` trigger to perform Google Custom Searches.
     - **News API Key**: Required for the `!news` trigger to fetch news headlines.
+    - **Google Places API Key**: Required for the `!map` trigger to fetch place information.
 
 ## File Structure
 
