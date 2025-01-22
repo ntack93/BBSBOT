@@ -407,27 +407,35 @@ class BBSBotApp:
             message = private_message_match.group(2)
             self.handle_private_trigger(username, message)
         else:
-            # Check for trigger commands in public messages
-            if "!weather" in clean_line:
-                location = clean_line.split("!weather", 1)[1].strip()
-                self.handle_weather_command(location)
-            elif "!yt" in clean_line:
-                query = clean_line.split("!yt", 1)[1].strip()
-                self.handle_youtube_command(query)
-            elif "!search" in clean_line:
-                query = clean_line.split("!search", 1)[1].strip()
-                self.handle_web_search_command(query)
-            elif "!chat" in clean_line:
-                query = clean_line.split("!chat", 1)[1].strip()
-                self.handle_chatgpt_command(query)
-            elif "!news" in clean_line:
-                topic = clean_line.split("!news", 1)[1].strip()
-                self.handle_news_command(topic)
-            elif "!map" in clean_line:
-                place = clean_line.split("!map", 1)[1].strip()
-                self.handle_map_command(place)
-            elif "!help" in clean_line:
-                self.handle_help_command()
+            # Check for page commands
+            page_message_match = re.match(r'(.+?) is paging you from (.+?): (.+)', clean_line)
+            if page_message_match:
+                username = page_message_match.group(1)
+                module_or_channel = page_message_match.group(2)
+                message = page_message_match.group(3)
+                self.handle_page_trigger(username, module_or_channel, message)
+            else:
+                # Check for trigger commands in public messages
+                if "!weather" in clean_line:
+                    location = clean_line.split("!weather", 1)[1].strip()
+                    self.handle_weather_command(location)
+                elif "!yt" in clean_line:
+                    query = clean_line.split("!yt", 1)[1].strip()
+                    self.handle_youtube_command(query)
+                elif "!search" in clean_line:
+                    query = clean_line.split("!search", 1)[1].strip()
+                    self.handle_web_search_command(query)
+                elif "!chat" in clean_line:
+                    query = clean_line.split("!chat", 1)[1].strip()
+                    self.handle_chatgpt_command(query)
+                elif "!news" in clean_line:
+                    topic = clean_line.split("!news", 1)[1].strip()
+                    self.handle_news_command(topic)
+                elif "!map" in clean_line:
+                    place = clean_line.split("!map", 1)[1].strip()
+                    self.handle_map_command(place)
+                elif "!help" in clean_line:
+                    self.handle_help_command()
 
     def handle_private_trigger(self, username, message):
         """
@@ -465,6 +473,45 @@ class BBSBotApp:
         chunks = self.chunk_message(message, 250)
         for chunk in chunks:
             full_message = f"Whisper to {username} {chunk}"
+            asyncio.run_coroutine_threadsafe(self._send_message(full_message + "\r\n"), self.loop)
+            self.append_terminal_text(full_message + "\n", "normal")
+
+    def handle_page_trigger(self, username, module_or_channel, message):
+        """
+        Handle page message triggers and respond accordingly.
+        """
+        if "!weather" in message:
+            location = message.split("!weather", 1)[1].strip()
+            response = self.get_weather_response(location)
+        elif "!yt" in message:
+            query = message.split("!yt", 1)[1].strip()
+            response = self.get_youtube_response(query)
+        elif "!search" in message:
+            query = message.split("!search", 1)[1].strip()
+            response = self.get_web_search_response(query)
+        elif "!chat" in message:
+            query = message.split("!chat", 1)[1].strip()
+            response = self.get_chatgpt_response(query)
+        elif "!news" in message:
+            topic = message.split("!news", 1)[1].strip()
+            response = self.get_news_response(topic)
+        elif "!map" in message:
+            place = message.split("!map", 1)[1].strip()
+            response = self.get_map_response(place)
+        elif "!help" in message:
+            response = self.get_help_response()
+        else:
+            response = "Unknown command."
+
+        self.send_page_response(username, module_or_channel, response)
+
+    def send_page_response(self, username, module_or_channel, message):
+        """
+        Send a page response to the specified user and module/channel.
+        """
+        chunks = self.chunk_message(message, 250)
+        for chunk in chunks:
+            full_message = f"/P {username} {chunk}"
             asyncio.run_coroutine_threadsafe(self._send_message(full_message + "\r\n"), self.loop)
             self.append_terminal_text(full_message + "\n", "normal")
 
@@ -932,27 +979,35 @@ class BBSBotApp:
             message = private_message_match.group(2)
             self.handle_private_trigger(username, message)
         else:
-            # Check for trigger commands in public messages
-            if "!weather" in clean_line:
-                location = clean_line.split("!weather", 1)[1].strip()
-                self.handle_weather_command(location)
-            elif "!yt" in clean_line:
-                query = clean_line.split("!yt", 1)[1].strip()
-                self.handle_youtube_command(query)
-            elif "!search" in clean_line:
-                query = clean_line.split("!search", 1)[1].strip()
-                self.handle_web_search_command(query)
-            elif "!chat" in clean_line:
-                query = clean_line.split("!chat", 1)[1].strip()
-                self.handle_chatgpt_command(query)
-            elif "!news" in clean_line:
-                topic = clean_line.split("!news", 1)[1].strip()
-                self.handle_news_command(topic)
-            elif "!map" in clean_line:
-                place = clean_line.split("!map", 1)[1].strip()
-                self.handle_map_command(place)
-            elif "!help" in clean_line:
-                self.handle_help_command()
+            # Check for page commands
+            page_message_match = re.match(r'(.+?) is paging you from (.+?): (.+)', clean_line)
+            if page_message_match:
+                username = page_message_match.group(1)
+                module_or_channel = page_message_match.group(2)
+                message = page_message_match.group(3)
+                self.handle_page_trigger(username, module_or_channel, message)
+            else:
+                # Check for trigger commands in public messages
+                if "!weather" in clean_line:
+                    location = clean_line.split("!weather", 1)[1].strip()
+                    self.handle_weather_command(location)
+                elif "!yt" in clean_line:
+                    query = clean_line.split("!yt", 1)[1].strip()
+                    self.handle_youtube_command(query)
+                elif "!search" in clean_line:
+                    query = clean_line.split("!search", 1)[1].strip()
+                    self.handle_web_search_command(query)
+                elif "!chat" in clean_line:
+                    query = clean_line.split("!chat", 1)[1].strip()
+                    self.handle_chatgpt_command(query)
+                elif "!news" in clean_line:
+                    topic = clean_line.split("!news", 1)[1].strip()
+                    self.handle_news_command(topic)
+                elif "!map" in clean_line:
+                    place = clean_line.split("!map", 1)[1].strip()
+                    self.handle_map_command(place)
+                elif "!help" in clean_line:
+                    self.handle_help_command()
 
     def handle_private_trigger(self, username, message):
         """
@@ -990,6 +1045,45 @@ class BBSBotApp:
         chunks = self.chunk_message(message, 250)
         for chunk in chunks:
             full_message = f"Whisper to {username} {chunk}"
+            asyncio.run_coroutine_threadsafe(self._send_message(full_message + "\r\n"), self.loop)
+            self.append_terminal_text(full_message + "\n", "normal")
+
+    def handle_page_trigger(self, username, module_or_channel, message):
+        """
+        Handle page message triggers and respond accordingly.
+        """
+        if "!weather" in message:
+            location = message.split("!weather", 1)[1].strip()
+            response = self.get_weather_response(location)
+        elif "!yt" in message:
+            query = message.split("!yt", 1)[1].strip()
+            response = self.get_youtube_response(query)
+        elif "!search" in message:
+            query = message.split("!search", 1)[1].strip()
+            response = self.get_web_search_response(query)
+        elif "!chat" in message:
+            query = message.split("!chat", 1)[1].strip()
+            response = self.get_chatgpt_response(query)
+        elif "!news" in message:
+            topic = message.split("!news", 1)[1].strip()
+            response = self.get_news_response(topic)
+        elif "!map" in message:
+            place = message.split("!map", 1)[1].strip()
+            response = self.get_map_response(place)
+        elif "!help" in message:
+            response = self.get_help_response()
+        else:
+            response = "Unknown command."
+
+        self.send_page_response(username, module_or_channel, response)
+
+    def send_page_response(self, username, module_or_channel, message):
+        """
+        Send a page response to the specified user and module/channel.
+        """
+        chunks = self.chunk_message(message, 250)
+        for chunk in chunks:
+            full_message = f"/P {username} {chunk}"
             asyncio.run_coroutine_threadsafe(self._send_message(full_message + "\r\n"), self.loop)
             self.append_terminal_text(full_message + "\n", "normal")
 

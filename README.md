@@ -14,6 +14,7 @@ BBS Chat Bot is a Python application that functions as a BBS Teleconference Bot.
 - Use `!yt <query>` for YouTube searches.
 - Use `!news <topic>` for news searches via newsapi.org.
 - Use `!map <place>` to fetch place information from Google Places API.
+- Use `/P <username> <message>` to send and receive pages with query responses.
 
 ## Requirements
 
@@ -112,6 +113,16 @@ To use the various `!triggers` in the bot, you need to set up API keys for diffe
     - **Google CSE ID (cx)**: Required for the `!search` trigger to perform Google Custom Searches.
     - **News API Key**: Required for the `!news` trigger to fetch news headlines.
     - **Google Places API Key**: Required for the `!map` trigger to fetch place information.
+
+6. To use the paging feature, send a page using the syntax `/P <username> <message>`. For example:
+    ```sh
+    /P Noah !weather 23518
+    ```
+
+7. To ensure you receive responses to your queries without interruption, turn on unlimited pages by sending:
+    ```sh
+    /P OK
+    ```
 
 ## File Structure
 
