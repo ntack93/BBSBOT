@@ -618,12 +618,8 @@ class BBSBotApp:
     def get_help_response(self):
         """Return the help message as a string."""
         return (
-            "Available commands:\n"
-            "!weather <location> - Get weather information for a location.\n"
-            "!yt <query> - Search YouTube for a query.\n"
-            "!search <query> - Perform a Google search for a query.\n"
-            "!chat <message> - Chat with the bot using ChatGPT.\n"
-            "!news <topic> - Get top news headlines for a topic.\n"
+            "Available commands: Please use a ! immediately followed by one of the following keywords (no space): "
+            "weather <location>, yt <query>, search <query>, chat <message>, news <topic>."
         )
 
     def append_terminal_text(self, text, default_tag="normal"):
@@ -945,18 +941,12 @@ class BBSBotApp:
     def handle_help_command(self):
         """Provide a list of available commands, adhering to character and chunk limits."""
         help_message = (
-            "Available commands:\n"
-            "!weather <location> - Get weather information for a location.\n"
-            "!yt <query> - Search YouTube for a query.\n"
-            "!search <query> - Perform a Google search for a query.\n"
-            "!chat <message> - Chat with the bot using ChatGPT.\n"
-            "!news <topic> - Get top news headlines for a topic.\n"
+            "Available commands: Please use a ! immediately followed by one of the following keywords (no space): "
+            "weather <location>, yt <query>, search <query>, chat <message>, news <topic>."
         )
 
-        # Split the help message into chunks
-        chunks = [help_message[i:i+200] for i in range(0, len(help_message), 200)]
-        for chunk in chunks:
-            self.send_full_message(chunk)
+        # Send the help message as a single chunk if possible
+        self.send_full_message(help_message)
 
     ########################################################################
     #                           Weather
