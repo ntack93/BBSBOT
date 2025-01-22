@@ -1,12 +1,11 @@
 # BBS Chat Bot
 
-BBS Chat Bot is a Python application that functions as a BBS Teleconference Bot with a MajorMUD mode for sending its responses as Gossips. The application provides a graphical user interface (GUI) built with Tkinter, allowing users to configure connection settings, toggle modes, and manage favorite BBS addresses.
+BBS Chat Bot is a Python application that functions as a BBS Teleconference Bot. The application provides a graphical user interface (GUI) built with Tkinter, allowing users to configure connection settings, toggle modes, and manage favorite BBS addresses.
 
 ## Features
 
 - Connect to a BBS using a specified host and port.
 - Toggle between ANSI and RIPscript terminal emulation modes.
-- Enable "Mud Mode" to prepend "gos " to messages, useful for games where chatting is referred to as "Gossip".
 - Manage favorite BBS addresses with the ability to add and remove favorites.
 - Save and load favorite addresses from local storage.
 - Use `!search <keyword>` for web searches.
@@ -34,6 +33,17 @@ BBS Chat Bot is a Python application that functions as a BBS Teleconference Bot 
     pip install -r requirements.txt
     ```
 
+3. Create `username.json` and `password.json` files in the project directory:
+    ```json
+    // username.json
+    "your_username"
+    ```
+
+    ```json
+    // password.json
+    "your_password"
+    ```
+
 ## Usage
 
 1. Run the application:
@@ -45,11 +55,9 @@ BBS Chat Bot is a Python application that functions as a BBS Teleconference Bot 
 
 3. Toggle between ANSI and RIPscript modes using the "Toggle Mode" button.
 
-4. Enable "Mud Mode" by checking the "Mud Mode" checkbox. This will prepend "gos " to every message sent.
+4. Manage your favorite BBS addresses using the "Favorites" button. Add new addresses or remove existing ones.
 
-5. Manage your favorite BBS addresses using the "Favorites" button. Add new addresses or remove existing ones.
-
-6. Open the Settings window to configure API keys and other settings required for the various `!triggers` to work:
+5. Open the Settings window to configure API keys and other settings required for the various `!triggers` to work:
     - **OpenAI API Key**: Required for the `!chat` trigger to interact with ChatGPT.
     - **Weather API Key**: Required for the `!weather` trigger to fetch weather information.
     - **YouTube API Key**: Required for the `!yt` trigger to perform YouTube searches.

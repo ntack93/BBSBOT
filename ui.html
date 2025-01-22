@@ -35,8 +35,27 @@
     <button id="toggleModeButton">Toggle Mode</button>
     <button id="favoritesButton">Favorites</button>
 
+    <!-- Mud Mode checkbox -->
+    <input type="checkbox" id="mudModeCheckbox"> Mud Mode
+
     <!-- Host input field -->
     <input type="text" id="hostInput" placeholder="Enter BBS Host">
+
+    <!-- Username frame -->
+    <div id="usernameFrame">
+        <label for="usernameInput">Username:</label>
+        <input type="text" id="usernameInput" placeholder="Enter Username">
+        <input type="checkbox" id="rememberUsername"> Remember
+        <button id="sendUsernameButton" onclick="sendMessage('username')">Send</button>
+    </div>
+
+    <!-- Password frame -->
+    <div id="passwordFrame">
+        <label for="passwordInput">Password:</label>
+        <input type="password" id="passwordInput" placeholder="Enter Password">
+        <input type="checkbox" id="rememberPassword"> Remember
+        <button id="sendPasswordButton" onclick="sendMessage('password')">Send</button>
+    </div>
 
     <!-- Favorites window -->
     <div id="favoritesWindow">

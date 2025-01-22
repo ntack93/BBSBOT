@@ -36,7 +36,12 @@ class BBSBotApp:
         self.google_cse_cx = tk.StringVar(value=DEFAULT_GOOGLE_CSE_CX)
         self.news_api_key = tk.StringVar(value=DEFAULT_NEWS_API_KEY)
         self.nickname = tk.StringVar(value=self.load_nickname())
+        self.username = tk.StringVar(value=self.load_username())
+        self.password = tk.StringVar(value=self.load_password())
+        self.remember_username = tk.BooleanVar(value=False)
+        self.remember_password = tk.BooleanVar(value=False)
         self.in_teleconference = False  # Flag to track teleconference state
+        self.mud_mode = tk.BooleanVar(value=False)
 
         # For best ANSI alignment, recommend a CP437-friendly monospace font:
         self.font_name = tk.StringVar(value="Courier New") 
@@ -56,8 +61,6 @@ class BBSBotApp:
 
         # A buffer to accumulate partial lines
         self.partial_line = ""
-
-        self.mud_mode = tk.BooleanVar(value=False)  # Mud Mode toggle variable
 
         self.favorites = self.load_favorites()  # Load favorite BBS addresses
         self.favorites_window = None  # Track the Favorites window instance
@@ -97,13 +100,39 @@ class BBSBotApp:
         settings_button = ttk.Button(config_frame, text="Settings", command=self.show_settings_window)
         settings_button.grid(row=0, column=5, padx=5, pady=5)
 
-        # Add a "Mud Mode" toggle button
-        mud_mode_button = ttk.Checkbutton(config_frame, text="Mud Mode", variable=self.mud_mode)
-        mud_mode_button.grid(row=0, column=6, padx=5, pady=5)
-
         # Add a "Favorites" button
         favorites_button = ttk.Button(config_frame, text="Favorites", command=self.show_favorites_window)
-        favorites_button.grid(row=0, column=7, padx=5, pady=5)
+        favorites_button.grid(row=0, column=6, padx=5, pady=5)
+
+        # Add a "Mud Mode" checkbox
+        mud_mode_check = ttk.Checkbutton(config_frame, text="Mud Mode", variable=self.mud_mode)
+        mud_mode_check.grid(row=0, column=7, padx=5, pady=5)
+
+        # ----- Username frame -----
+        username_frame = ttk.LabelFrame(main_frame, text="Username")
+        username_frame.pack(fill=tk.X, padx=5, pady=5)
+
+        self.username_entry = ttk.Entry(username_frame, textvariable=self.username, width=30)
+        self.username_entry.pack(side=tk.LEFT, padx=5, pady=5)
+
+        self.remember_username_check = ttk.Checkbutton(username_frame, text="Remember", variable=self.remember_username)
+        self.remember_username_check.pack(side=tk.LEFT, padx=5, pady=5)
+
+        self.send_username_button = ttk.Button(username_frame, text="Send", command=self.send_username)
+        self.send_username_button.pack(side=tk.LEFT, padx=5, pady=5)
+
+        # ----- Password frame -----
+        password_frame = ttk.LabelFrame(main_frame, text="Password")
+        password_frame.pack(fill=tk.X, padx=5, pady=5)
+
+        self.password_entry = ttk.Entry(password_frame, textvariable=self.password, width=30, show="*")
+        self.password_entry.pack(side=tk.LEFT, padx=5, pady=5)
+
+        self.remember_password_check = ttk.Checkbutton(password_frame, text="Remember", variable=self.remember_password)
+        self.remember_password_check.pack(side=tk.LEFT, padx=5, pady=5)
+
+        self.send_password_button = ttk.Button(password_frame, text="Send", command=self.send_password)
+        self.send_password_button.pack(side=tk.LEFT, padx=5, pady=5)
 
         # ----- Terminal output -----
         terminal_frame = ttk.LabelFrame(main_frame, text="BBS Output")
@@ -199,6 +228,11 @@ class BBSBotApp:
             )
         )
         info_label.grid(row=row_index, column=0, columnspan=2, padx=5, pady=5, sticky=tk.W)
+        row_index += 1
+
+        # Add Mud Mode checkbox
+        ttk.Label(settings_win, text="Mud Mode:").grid(row=row_index, column=0, padx=5, pady=5, sticky=tk.E)
+        ttk.Checkbutton(settings_win, variable=self.mud_mode).grid(row=row_index, column=1, padx=5, pady=5, sticky=tk.W)
         row_index += 1
 
         # ----- Save Button -----
@@ -359,24 +393,236 @@ class BBSBotApp:
         ansi_escape_regex = re.compile(r'\x1b\[(.*?)m')
         clean_line = ansi_escape_regex.sub('', line)
 
-        # Check for trigger commands
-        if "!weather" in clean_line:
-            location = clean_line.split("!weather", 1)[1].strip()
-            self.handle_weather_command(location)
-        elif "!yt" in clean_line:
-            query = clean_line.split("!yt", 1)[1].strip()
-            self.handle_youtube_command(query)
-        elif "!search" in clean_line:
-            query = clean_line.split("!search", 1)[1].strip()
-            self.handle_web_search_command(query)
-        elif "!chat" in clean_line:
-            query = clean_line.split("!chat", 1)[1].strip()
-            self.handle_chatgpt_command(query)
-        elif "!news" in clean_line:
-            topic = clean_line.split("!news", 1)[1].strip()
-            self.handle_news_command(topic)
-        elif "!help" in clean_line:
-            self.handle_help_command()
+        # Check if the message is private
+        private_message_match = re.match(r'From (.+?) \(whispered\): (.+)', clean_line)
+        if private_message_match:
+            username = private_message_match.group(1)
+            message = private_message_match.group(2)
+            self.handle_private_trigger(username, message)
+        else:
+            # Check for trigger commands in public messages
+            if "!weather" in clean_line:
+                location = clean_line.split("!weather", 1)[1].strip()
+                self.handle_weather_command(location)
+            elif "!yt" in clean_line:
+                query = clean_line.split("!yt", 1)[1].strip()
+                self.handle_youtube_command(query)
+            elif "!search" in clean_line:
+                query = clean_line.split("!search", 1)[1].strip()
+                self.handle_web_search_command(query)
+            elif "!chat" in clean_line:
+                query = clean_line.split("!chat", 1)[1].strip()
+                self.handle_chatgpt_command(query)
+            elif "!news" in clean_line:
+                topic = clean_line.split("!news", 1)[1].strip()
+                self.handle_news_command(topic)
+            elif "!help" in clean_line:
+                self.handle_help_command()
+
+    def handle_private_trigger(self, username, message):
+        """
+        Handle private message triggers and respond privately.
+        """
+        if "!weather" in message:
+            location = message.split("!weather", 1)[1].strip()
+            response = self.get_weather_response(location)
+        elif "!yt" in message:
+            query = message.split("!yt", 1)[1].strip()
+            response = self.get_youtube_response(query)
+        elif "!search" in message:
+            query = message.split("!search", 1)[1].strip()
+            response = self.get_web_search_response(query)
+        elif "!chat" in message:
+            query = message.split("!chat", 1)[1].strip()
+            response = self.get_chatgpt_response(query)
+        elif "!news" in message:
+            topic = message.split("!news", 1)[1].strip()
+            response = self.get_news_response(topic)
+        elif "!help" in message:
+            response = self.get_help_response()
+        else:
+            response = "Unknown command."
+
+        self.send_private_message(username, response)
+
+    def send_private_message(self, username, message):
+        """
+        Send a private message to the specified user.
+        """
+        full_message = f"Whisper to {username} {message}"
+        asyncio.run_coroutine_threadsafe(self._send_message(full_message + "\r\n"), self.loop)
+        self.append_terminal_text(full_message + "\n", "normal")
+
+    def get_weather_response(self, location):
+        """Fetch weather info and return the response as a string."""
+        key = self.weather_api_key.get()
+        if not key:
+            return "Weather API key is missing."
+        elif not location:
+            return "Please specify a city or zip code."
+        else:
+            url = "http://api.openweathermap.org/data/2.5/weather"
+            params = {
+                "q": location,
+                "appid": key,
+                "units": "imperial"
+            }
+            try:
+                r = requests.get(url, params=params, timeout=10)
+                r.raise_for_status()  # Raise an HTTPError for bad responses
+                data = r.json()
+                if data.get("cod") != 200:
+                    return f"Could not get weather for '{location}'."
+                else:
+                    desc = data["weather"][0]["description"]
+                    temp_f = data["main"]["temp"]
+                    feels_like = data["main"]["feels_like"]
+                    humidity = data["main"]["humidity"]
+                    wind_speed = data["wind"]["speed"]
+                    
+                    return (
+                        f"Weather in {location.title()}: {desc}, {temp_f:.1f}°F "
+                        f"(feels like {feels_like:.1f}°F), Humidity {humidity}%, Wind {wind_speed} mph."
+                    )
+            except requests.exceptions.RequestException as e:
+                return f"Error fetching weather: {str(e)}"
+
+    def get_youtube_response(self, query):
+        """Perform a YouTube search and return the response as a string."""
+        key = self.youtube_api_key.get()
+        if not key:
+            return "YouTube API key is missing."
+        else:
+            url = "https://www.googleapis.com/youtube/v3/search"
+            params = {
+                "part": "snippet",
+                "q": query,
+                "key": key,
+                "maxResults": 1
+            }
+            try:
+                r = requests.get(url, params=params)
+                data = r.json()
+                items = data.get("items", [])
+                if not items:
+                    return f"No YouTube results found for '{query}'."
+                else:
+                    video_id = items[0]["id"].get("videoId")
+                    title = items[0]["snippet"]["title"]
+                    url_link = f"https://www.youtube.com/watch?v={video_id}"
+                    return f"Top YouTube result: {title}\n{url_link}"
+            except Exception as e:
+                return f"Error fetching YouTube results: {str(e)}"
+
+    def get_web_search_response(self, query):
+        """Perform a Google Custom Search and return the response as a string."""
+        cse_key = self.google_cse_api_key.get()
+        cse_id = self.google_cse_cx.get()
+        if not cse_key or not cse_id:
+            return "Google CSE API key or engine ID is missing."
+        else:
+            url = "https://www.googleapis.com/customsearch/v1"
+            params = {
+                "key": cse_key,
+                "cx": cse_id,
+                "q": query,
+                "num": 1  # just one top result
+            }
+            try:
+                r = requests.get(url, params=params)
+                data = r.json()
+                items = data.get("items", [])
+                if not items:
+                    return f"No Google search results found for '{query}'."
+                else:
+                    top = items[0]
+                    title = top.get("title", "No Title")
+                    snippet = top.get("snippet", "")
+                    link = top.get("link", "No Link")
+
+                    return (
+                        f"Top Google result for '{query}':\n"
+                        f"Title: {title}\n"
+                        f"Snippet: {snippet}\n"
+                        f"Link: {link}"
+                    )
+            except Exception as e:
+                return f"Error with Google search: {str(e)}"
+
+    def get_chatgpt_response(self, user_text):
+        """Send user_text to ChatGPT and return the response as a string."""
+        key = self.openai_api_key.get()
+        if not key:
+            return "OpenAI API key is missing."
+
+        openai.api_key = key
+
+        system_message = (
+            "You are a helpful assistant. Respond concisely, longer responses should split into "
+            "200-character blocks for display, but don't exceed 500 total characters in your responses."
+        )
+
+        try:
+            completion = openai.ChatCompletion.create(
+                model="gpt-4o-mini",
+                n=1,
+                max_tokens=500,  # Allow for longer responses
+                messages=[
+                    {
+                        "role": "system",
+                        "content": system_message
+                    },
+                    {
+                        "role": "user",
+                        "content": user_text
+                    }
+                ]
+            )
+            return completion.choices[0].message["content"]
+
+        except Exception as e:
+            return f"Error with ChatGPT API: {str(e)}"
+
+    def get_news_response(self, topic):
+        """Fetch top 2 news headlines and return the response as a string."""
+        key = self.news_api_key.get()
+        if not key:
+            return "News API key is missing."
+        else:
+            url = "https://newsapi.org/v2/everything"  # Using "everything" endpoint for broader topic search
+            params = {
+                "q": topic,  # The keyword/topic to search for
+                "apiKey": key,
+                "language": "en",
+                "pageSize": 2  # Fetch top 2 headlines
+            }
+            try:
+                r = requests.get(url, params=params)
+                data = r.json()
+                articles = data.get("articles", [])
+                if not articles:
+                    return f"No news articles found for '{topic}'."
+                else:
+                    response = f"Top news on '{topic}':\n"
+                    for i, article in enumerate(articles):
+                        title = article.get("title", "No Title")
+                        description = article.get("description", "No Description")
+                        link = article.get("url", "No URL")
+                        response += f"{i + 1}. {title}\n   {description}\n   {link}\n\n"
+                    return response
+            except Exception as e:
+                return f"Error fetching news: {str(e)}"
+
+    def get_help_response(self):
+        """Return the help message as a string."""
+        return (
+            "Available commands:\n"
+            "!weather <location> - Get weather information for a location.\n"
+            "!yt <query> - Search YouTube for a query.\n"
+            "!search <query> - Perform a Google search for a query.\n"
+            "!chat <message> - Chat with the bot using ChatGPT.\n"
+            "!news <topic> - Get top news headlines for a topic.\n"
+        )
 
     def append_terminal_text(self, text, default_tag="normal"):
         """Append text to the terminal display with ANSI parsing."""
@@ -445,18 +691,37 @@ class BBSBotApp:
         user_input = self.input_var.get()
         self.input_var.set("")
         if user_input.strip():
-            asyncio.run_coroutine_threadsafe(self._send_message(user_input), self.loop)
+            prefix = "Gos " if self.mud_mode.get() else ""
+            message = prefix + user_input
+            asyncio.run_coroutine_threadsafe(self._send_message(message + "\r\n"), self.loop)
+            self.append_terminal_text(message + "\n", "normal")
+            print(f"Sent to BBS: {message}")
 
     async def _send_message(self, message):
         """Coroutine to send a message."""
-        self.writer.write(message + "\r\n")
+        self.writer.write(message)
         await self.writer.drain()
 
     def send_full_message(self, message):
         """Send a full message to the terminal display and the BBS server."""
-        self.append_terminal_text(message + "\n", "normal")
-        if self.connected and self.writer:
-            asyncio.run_coroutine_threadsafe(self._send_message(message), self.loop)
+        prefix = "Gos " if self.mud_mode.get() else ""
+        lines = message.split('\n')
+        for line in lines:
+            line_with_prefix = prefix + line
+            self.append_terminal_text(line_with_prefix + "\n", "normal")
+            if self.connected and self.writer:
+                if line.strip():  # Only send non-empty lines
+                    asyncio.run_coroutine_threadsafe(self._send_message(line_with_prefix + "\r\n"), self.loop)
+                    print(f"Sent to BBS: {line_with_prefix}")
+                else:
+                    print(f"Not connected. Failed to send: {line_with_prefix}")
+
+    def chunk_message(self, message, chunk_size):
+        """Chunk a message into specified size."""
+        chunks = []
+        for i in range(0, len(message), chunk_size):
+            chunks.append(message[i:i + chunk_size])
+        return chunks
 
     def show_favorites_window(self):
         """Open a Toplevel window to manage favorite BBS addresses."""
@@ -548,6 +813,46 @@ class BBSBotApp:
         with open("nickname.json", "w") as file:
             json.dump(self.nickname.get(), file)
 
+    def send_username(self):
+        """Send the username to the BBS."""
+        if self.connected and self.writer:
+            username = self.username.get()
+            asyncio.run_coroutine_threadsafe(self._send_message(username + "\r\n"), self.loop)  # Append carriage return and newline
+            if self.remember_username.get():
+                self.save_username()
+
+    def send_password(self):
+        """Send the password to the BBS."""
+        if self.connected and self.writer:
+            password = self.password.get()
+            asyncio.run_coroutine_threadsafe(self._send_message(password + "\r\n"), self.loop)  # Append carriage return and newline
+            if self.remember_password.get():
+                self.save_password()
+
+    def load_username(self):
+        """Load username from a file."""
+        if os.path.exists("username.json"):
+            with open("username.json", "r") as file:
+                return json.load(file)
+        return ""
+
+    def save_username(self):
+        """Save username to a file."""
+        with open("username.json", "w") as file:
+            json.dump(self.username.get(), file)
+
+    def load_password(self):
+        """Load password from a file."""
+        if os.path.exists("password.json"):
+            with open("password.json", "r") as file:
+                return json.load(file)
+        return ""
+
+    def save_password(self):
+        """Save password to a file."""
+        with open("password.json", "w") as file:
+            json.dump(self.password.get(), file)
+
     ########################################################################
     #                           Trigger Parsing
     ########################################################################
@@ -559,24 +864,236 @@ class BBSBotApp:
         ansi_escape_regex = re.compile(r'\x1b\[(.*?)m')
         clean_line = ansi_escape_regex.sub('', line)
 
-        # Check for trigger commands
-        if "!weather" in clean_line:
-            location = clean_line.split("!weather", 1)[1].strip()
-            self.handle_weather_command(location)
-        elif "!yt" in clean_line:
-            query = clean_line.split("!yt", 1)[1].strip()
-            self.handle_youtube_command(query)
-        elif "!search" in clean_line:
-            query = clean_line.split("!search", 1)[1].strip()
-            self.handle_web_search_command(query)
-        elif "!chat" in clean_line:
-            query = clean_line.split("!chat", 1)[1].strip()
-            self.handle_chatgpt_command(query)
-        elif "!news" in clean_line:
-            topic = clean_line.split("!news", 1)[1].strip()
-            self.handle_news_command(topic)
-        elif "!help" in clean_line:
-            self.handle_help_command()
+        # Check if the message is private
+        private_message_match = re.match(r'From (.+?) \(whispered\): (.+)', clean_line)
+        if private_message_match:
+            username = private_message_match.group(1)
+            message = private_message_match.group(2)
+            self.handle_private_trigger(username, message)
+        else:
+            # Check for trigger commands in public messages
+            if "!weather" in clean_line:
+                location = clean_line.split("!weather", 1)[1].strip()
+                self.handle_weather_command(location)
+            elif "!yt" in clean_line:
+                query = clean_line.split("!yt", 1)[1].strip()
+                self.handle_youtube_command(query)
+            elif "!search" in clean_line:
+                query = clean_line.split("!search", 1)[1].strip()
+                self.handle_web_search_command(query)
+            elif "!chat" in clean_line:
+                query = clean_line.split("!chat", 1)[1].strip()
+                self.handle_chatgpt_command(query)
+            elif "!news" in clean_line:
+                topic = clean_line.split("!news", 1)[1].strip()
+                self.handle_news_command(topic)
+            elif "!help" in clean_line:
+                self.handle_help_command()
+
+    def handle_private_trigger(self, username, message):
+        """
+        Handle private message triggers and respond privately.
+        """
+        if "!weather" in message:
+            location = message.split("!weather", 1)[1].strip()
+            response = self.get_weather_response(location)
+        elif "!yt" in message:
+            query = message.split("!yt", 1)[1].strip()
+            response = self.get_youtube_response(query)
+        elif "!search" in message:
+            query = message.split("!search", 1)[1].strip()
+            response = self.get_web_search_response(query)
+        elif "!chat" in message:
+            query = message.split("!chat", 1)[1].strip()
+            response = self.get_chatgpt_response(query)
+        elif "!news" in message:
+            topic = message.split("!news", 1)[1].strip()
+            response = self.get_news_response(topic)
+        elif "!help" in message:
+            response = self.get_help_response()
+        else:
+            response = "Unknown command."
+
+        self.send_private_message(username, response)
+
+    def send_private_message(self, username, message):
+        """
+        Send a private message to the specified user.
+        """
+        full_message = f"Whisper to {username} {message}"
+        asyncio.run_coroutine_threadsafe(self._send_message(full_message + "\r\n"), self.loop)
+        self.append_terminal_text(full_message + "\n", "normal")
+
+    def get_weather_response(self, location):
+        """Fetch weather info and return the response as a string."""
+        key = self.weather_api_key.get()
+        if not key:
+            return "Weather API key is missing."
+        elif not location:
+            return "Please specify a city or zip code."
+        else:
+            url = "http://api.openweathermap.org/data/2.5/weather"
+            params = {
+                "q": location,
+                "appid": key,
+                "units": "imperial"
+            }
+            try:
+                r = requests.get(url, params=params, timeout=10)
+                r.raise_for_status()  # Raise an HTTPError for bad responses
+                data = r.json()
+                if data.get("cod") != 200:
+                    return f"Could not get weather for '{location}'."
+                else:
+                    desc = data["weather"][0]["description"]
+                    temp_f = data["main"]["temp"]
+                    feels_like = data["main"]["feels_like"]
+                    humidity = data["main"]["humidity"]
+                    wind_speed = data["wind"]["speed"]
+                    
+                    return (
+                        f"Weather in {location.title()}: {desc}, {temp_f:.1f}°F "
+                        f"(feels like {feels_like:.1f}°F), Humidity {humidity}%, Wind {wind_speed} mph."
+                    )
+            except requests.exceptions.RequestException as e:
+                return f"Error fetching weather: {str(e)}"
+
+    def get_youtube_response(self, query):
+        """Perform a YouTube search and return the response as a string."""
+        key = self.youtube_api_key.get()
+        if not key:
+            return "YouTube API key is missing."
+        else:
+            url = "https://www.googleapis.com/youtube/v3/search"
+            params = {
+                "part": "snippet",
+                "q": query,
+                "key": key,
+                "maxResults": 1
+            }
+            try:
+                r = requests.get(url, params=params)
+                data = r.json()
+                items = data.get("items", [])
+                if not items:
+                    return f"No YouTube results found for '{query}'."
+                else:
+                    video_id = items[0]["id"].get("videoId")
+                    title = items[0]["snippet"]["title"]
+                    url_link = f"https://www.youtube.com/watch?v={video_id}"
+                    return f"Top YouTube result: {title}\n{url_link}"
+            except Exception as e:
+                return f"Error fetching YouTube results: {str(e)}"
+
+    def get_web_search_response(self, query):
+        """Perform a Google Custom Search and return the response as a string."""
+        cse_key = self.google_cse_api_key.get()
+        cse_id = self.google_cse_cx.get()
+        if not cse_key or not cse_id:
+            return "Google CSE API key or engine ID is missing."
+        else:
+            url = "https://www.googleapis.com/customsearch/v1"
+            params = {
+                "key": cse_key,
+                "cx": cse_id,
+                "q": query,
+                "num": 1  # just one top result
+            }
+            try:
+                r = requests.get(url, params=params)
+                data = r.json()
+                items = data.get("items", [])
+                if not items:
+                    return f"No Google search results found for '{query}'."
+                else:
+                    top = items[0]
+                    title = top.get("title", "No Title")
+                    snippet = top.get("snippet", "")
+                    link = top.get("link", "No Link")
+
+                    return (
+                        f"Top Google result for '{query}':\n"
+                        f"Title: {title}\n"
+                        f"Snippet: {snippet}\n"
+                        f"Link: {link}"
+                    )
+            except Exception as e:
+                return f"Error with Google search: {str(e)}"
+
+    def get_chatgpt_response(self, user_text):
+        """Send user_text to ChatGPT and return the response as a string."""
+        key = self.openai_api_key.get()
+        if not key:
+            return "OpenAI API key is missing."
+
+        openai.api_key = key
+
+        system_message = (
+            "You are a helpful assistant. Respond concisely, longer responses should split into "
+            "200-character blocks for display, but don't exceed 500 total characters in your responses."
+        )
+
+        try:
+            completion = openai.ChatCompletion.create(
+                model="gpt-4o-mini",
+                n=1,
+                max_tokens=500,  # Allow for longer responses
+                messages=[
+                    {
+                        "role": "system",
+                        "content": system_message
+                    },
+                    {
+                        "role": "user",
+                        "content": user_text
+                    }
+                ]
+            )
+            return completion.choices[0].message["content"]
+
+        except Exception as e:
+            return f"Error with ChatGPT API: {str(e)}"
+
+    def get_news_response(self, topic):
+        """Fetch top 2 news headlines and return the response as a string."""
+        key = self.news_api_key.get()
+        if not key:
+            return "News API key is missing."
+        else:
+            url = "https://newsapi.org/v2/everything"  # Using "everything" endpoint for broader topic search
+            params = {
+                "q": topic,  # The keyword/topic to search for
+                "apiKey": key,
+                "language": "en",
+                "pageSize": 2  # Fetch top 2 headlines
+            }
+            try:
+                r = requests.get(url, params=params)
+                data = r.json()
+                articles = data.get("articles", [])
+                if not articles:
+                    return f"No news articles found for '{topic}'."
+                else:
+                    response = f"Top news on '{topic}':\n"
+                    for i, article in enumerate(articles):
+                        title = article.get("title", "No Title")
+                        description = article.get("description", "No Description")
+                        link = article.get("url", "No URL")
+                        response += f"{i + 1}. {title}\n   {description}\n   {link}\n\n"
+                    return response
+            except Exception as e:
+                return f"Error fetching news: {str(e)}"
+
+    def get_help_response(self):
+        """Return the help message as a string."""
+        return (
+            "Available commands:\n"
+            "!weather <location> - Get weather information for a location.\n"
+            "!yt <query> - Search YouTube for a query.\n"
+            "!search <query> - Perform a Google search for a query.\n"
+            "!chat <message> - Chat with the bot using ChatGPT.\n"
+            "!news <topic> - Get top news headlines for a topic.\n"
+        )
 
     ########################################################################
     #                           Help
@@ -595,9 +1112,7 @@ class BBSBotApp:
         # Split the help message into chunks
         chunks = [help_message[i:i+200] for i in range(0, len(help_message), 200)]
         for chunk in chunks:
-            self.append_terminal_text(chunk + "\n", "normal")
-            if self.connected and self.writer:
-                asyncio.run_coroutine_threadsafe(self._send_message(chunk), self.loop)
+            self.send_full_message(chunk)
 
     ########################################################################
     #                           Weather
@@ -607,6 +1122,8 @@ class BBSBotApp:
         key = self.weather_api_key.get()
         if not key:
             response = "Weather API key is missing."
+        elif not location:
+            response = "Please specify a city or zip code."
         else:
             url = "http://api.openweathermap.org/data/2.5/weather"
             params = {
@@ -615,7 +1132,8 @@ class BBSBotApp:
                 "units": "imperial"
             }
             try:
-                r = requests.get(url, params=params)
+                r = requests.get(url, params=params, timeout=10)
+                r.raise_for_status()  # Raise an HTTPError for bad responses
                 data = r.json()
                 if data.get("cod") != 200:
                     response = f"Could not get weather for '{location}'."
@@ -627,11 +1145,10 @@ class BBSBotApp:
                     wind_speed = data["wind"]["speed"]
                     
                     response = (
-                        f"Weather in {location.title()}:\n"
-                        f"{desc}, {temp_f:.1f}°F (feels like {feels_like:.1f}°F)\n"
-                        f"Humidity {humidity}%, Wind {wind_speed} mph."
+                        f"Weather in {location.title()}: {desc}, {temp_f:.1f}°F "
+                        f"(feels like {feels_like:.1f}°F), Humidity {humidity}%, Wind {wind_speed} mph."
                     )
-            except Exception as e:
+            except requests.exceptions.RequestException as e:
                 response = f"Error fetching weather: {str(e)}"
 
         self.send_full_message(response)
@@ -726,17 +1243,10 @@ class BBSBotApp:
 
         openai.api_key = key
 
-        # Determine the system message based on Mud Mode
-        if self.mud_mode.get():
-            system_message = (
-                "You are a helpful assistant. Respond concisely, responses should not exceed "
-                "200 characters in total. Ensure the response is a complete sentence."
-            )
-        else:
-            system_message = (
-                "You are a helpful assistant. Respond concisely, longer responses should split into "
-                "200-character blocks for display, but don't exceed 500 total characters in your responses."
-            )
+        system_message = (
+            "You are a helpful assistant. Respond concisely, longer responses should split into "
+            "200-character blocks for display, but don't exceed 500 total characters in your responses."
+        )
 
         try:
             completion = openai.ChatCompletion.create(
@@ -755,10 +1265,6 @@ class BBSBotApp:
                 ]
             )
             gpt_response = completion.choices[0].message["content"]
-
-            # Truncate response to 200 characters if Mud Mode is enabled
-            if self.mud_mode.get():
-                gpt_response = gpt_response[:200].rsplit(' ', 1)[0]  # Ensure it doesn't cut off mid-word
 
         except Exception as e:
             gpt_response = f"Error with ChatGPT API: {str(e)}"

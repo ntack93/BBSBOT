@@ -29,6 +29,21 @@ function updateFavoritesList(favorites) {
 
 let favorites = loadFavorites();
 
+// Load and set the state of the remember checkboxes
+document.addEventListener('DOMContentLoaded', function() {
+    const rememberUsername = localStorage.getItem('rememberUsername') === 'true';
+    const rememberPassword = localStorage.getItem('rememberPassword') === 'true';
+    document.getElementById('rememberUsername').checked = rememberUsername;
+    document.getElementById('rememberPassword').checked = rememberPassword;
+
+    if (rememberUsername) {
+        document.getElementById('usernameInput').value = localStorage.getItem('username') || '';
+    }
+    if (rememberPassword) {
+        document.getElementById('passwordInput').value = localStorage.getItem('password') || '';
+    }
+});
+
 document.getElementById('toggleModeButton').addEventListener('click', function() {
     const currentMode = document.body.getAttribute('data-mode');
     if (currentMode === 'ansi') {
@@ -154,5 +169,54 @@ document.getElementById('hostInput').addEventListener('contextmenu', (event) => 
 
 // Add context menu event listener to the BBS input field
 document.getElementById('inputBox').addEventListener('contextmenu', (event) => createContextMenu(event, event.target));
+
+// Add event listener for the "Mud Mode" checkbox
+document.getElementById('mudModeCheckbox').addEventListener('change', function() {
+    const mudMode = document.getElementById('mudModeCheckbox').checked;
+    localStorage.setItem('mudMode', mudMode);
+});
+
+// Function to send a message with optional Mud Mode prefix
+function sendMessage(message) {
+    const mudMode = localStorage.getItem('mudMode') === 'true';
+    const prefix = mudMode ? 'Gos ' : '';
+    const fullMessage = prefix + message + '\r\n'; // Append carriage return and newline
+    const chunks = chunkMessage(fullMessage, 250);
+    chunks.forEach(chunk => {
+        // Send each chunk to the BBS (implement the actual sending logic)
+        console.log('Message sent:', chunk);
+    });
+}
+
+// Function to chunk a message into 250-character chunks
+function chunkMessage(message, chunkSize) {
+    const chunks = [];
+    for (let i = 0; i < message.length; i += chunkSize) {
+        chunks.push(message.slice(i, i + chunkSize));
+    }
+    return chunks;
+}
+
+// Add event listener for the "Send Username" button
+document.getElementById('sendUsernameButton').addEventListener('click', function() {
+    const username = document.getElementById('usernameInput').value;
+    const rememberUsername = document.getElementById('rememberUsername').checked;
+    localStorage.setItem('rememberUsername', rememberUsername);
+    if (rememberUsername) {
+        localStorage.setItem('username', username);
+    }
+    sendMessage(username + '\r\n'); // Append carriage return and newline
+});
+
+// Add event listener for the "Send Password" button
+document.getElementById('sendPasswordButton').addEventListener('click', function() {
+    const password = document.getElementById('passwordInput').value;
+    const rememberPassword = document.getElementById('rememberPassword').checked;
+    localStorage.setItem('rememberPassword', rememberPassword);
+    if (rememberPassword) {
+        localStorage.setItem('password', password);
+    }
+    sendMessage(password + '\r\n'); // Append carriage return and newline
+});
 
 // ...existing code...
