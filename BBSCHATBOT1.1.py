@@ -719,10 +719,21 @@ class BBSBotApp:
                     print(f"Not connected. Failed to send: {line_with_prefix}")
 
     def chunk_message(self, message, chunk_size):
-        """Chunk a message into specified size."""
+        """Chunk a message into specified size, ensuring no content is lost."""
+        words = message.split()
         chunks = []
-        for i in range(0, len(message), chunk_size):
-            chunks.append(message[i:i + chunk_size])
+        current_chunk = []
+
+        for word in words:
+            if len(' '.join(current_chunk + [word])) <= chunk_size:
+                current_chunk.append(word)
+            else:
+                chunks.append(' '.join(current_chunk))
+                current_chunk = [word]
+
+        if current_chunk:
+            chunks.append(' '.join(current_chunk))
+
         return chunks
 
     def show_favorites_window(self):
