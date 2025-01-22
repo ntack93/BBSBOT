@@ -481,10 +481,12 @@ class BBSBotApp:
                     feels_like = data["main"]["feels_like"]
                     humidity = data["main"]["humidity"]
                     wind_speed = data["wind"]["speed"]
+                    precipitation = data.get("rain", {}).get("1h", 0) + data.get("snow", {}).get("1h", 0)
                     
                     return (
                         f"Weather in {location.title()}: {desc}, {temp_f:.1f}°F "
-                        f"(feels like {feels_like:.1f}°F), Humidity {humidity}%, Wind {wind_speed} mph."
+                        f"(feels like {feels_like:.1f}°F), Humidity {humidity}%, Wind {wind_speed} mph, "
+                        f"Precipitation {precipitation} mm."
                     )
             except requests.exceptions.RequestException as e:
                 return f"Error fetching weather: {str(e)}"
@@ -561,7 +563,7 @@ class BBSBotApp:
 
         system_message = (
             "You are a helpful assistant. Respond concisely, longer responses should split into "
-            "200-character blocks for display, but don't exceed 500 total characters in your responses."
+            "250-character blocks for display, but don't exceed 500 total characters in your responses."
         )
 
         try:
@@ -977,10 +979,12 @@ class BBSBotApp:
                     feels_like = data["main"]["feels_like"]
                     humidity = data["main"]["humidity"]
                     wind_speed = data["wind"]["speed"]
+                    precipitation = data.get("rain", {}).get("1h", 0) + data.get("snow", {}).get("1h", 0)
                     
                     response = (
                         f"Weather in {location.title()}: {desc}, {temp_f:.1f}°F "
-                        f"(feels like {feels_like:.1f}°F), Humidity {humidity}%, Wind {wind_speed} mph."
+                        f"(feels like {feels_like:.1f}°F), Humidity {humidity}%, Wind {wind_speed} mph, "
+                        f"Precipitation {precipitation} mm."
                     )
             except requests.exceptions.RequestException as e:
                 response = f"Error fetching weather: {str(e)}"
