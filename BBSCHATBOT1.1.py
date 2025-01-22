@@ -20,6 +20,7 @@ DEFAULT_YOUTUBE_API_KEY = ""
 DEFAULT_GOOGLE_CSE_KEY = ""  # Google Custom Search API Key
 DEFAULT_GOOGLE_CSE_CX = ""   # Google Custom Search Engine ID (cx)
 DEFAULT_NEWS_API_KEY = ""  # NewsAPI Key
+DEFAULT_GOOGLE_PLACES_API_KEY = ""  # Google Places API Key
 
 class BBSBotApp:
     def __init__(self, master):
@@ -35,6 +36,7 @@ class BBSBotApp:
         self.google_cse_api_key = tk.StringVar(value=DEFAULT_GOOGLE_CSE_KEY)
         self.google_cse_cx = tk.StringVar(value=DEFAULT_GOOGLE_CSE_CX)
         self.news_api_key = tk.StringVar(value=DEFAULT_NEWS_API_KEY)
+        self.google_places_api_key = tk.StringVar(value=DEFAULT_GOOGLE_PLACES_API_KEY)
         self.nickname = tk.StringVar(value=self.load_nickname())
         self.username = tk.StringVar(value=self.load_username())
         self.password = tk.StringVar(value=self.load_password())
@@ -204,6 +206,11 @@ class BBSBotApp:
         # ----- News API Key -----
         ttk.Label(settings_win, text="News API Key:").grid(row=row_index, column=0, padx=5, pady=5, sticky=tk.E)
         ttk.Entry(settings_win, textvariable=self.news_api_key, width=40).grid(row=row_index, column=1, padx=5, pady=5)
+        row_index += 1
+
+        # ----- Google Places API Key -----
+        ttk.Label(settings_win, text="Google Places API Key:").grid(row=row_index, column=0, padx=5, pady=5, sticky=tk.E)
+        ttk.Entry(settings_win, textvariable=self.google_places_api_key, width=40).grid(row=row_index, column=1, padx=5, pady=5)
         row_index += 1
 
         # ----- Font Name -----
@@ -387,7 +394,7 @@ class BBSBotApp:
 
     def parse_incoming_triggers(self, line):
         """
-        Check for commands in the given line: !weather, !yt, !search, !chat, !news, !help
+        Check for commands in the given line: !weather, !yt, !search, !chat, !news, !map, !help
         """
         # Remove ANSI codes for easier parsing
         ansi_escape_regex = re.compile(r'\x1b\[(.*?)m')
@@ -416,6 +423,9 @@ class BBSBotApp:
             elif "!news" in clean_line:
                 topic = clean_line.split("!news", 1)[1].strip()
                 self.handle_news_command(topic)
+            elif "!map" in clean_line:
+                place = clean_line.split("!map", 1)[1].strip()
+                self.handle_map_command(place)
             elif "!help" in clean_line:
                 self.handle_help_command()
 
@@ -438,6 +448,9 @@ class BBSBotApp:
         elif "!news" in message:
             topic = message.split("!news", 1)[1].strip()
             response = self.get_news_response(topic)
+        elif "!map" in message:
+            place = message.split("!map", 1)[1].strip()
+            response = self.get_map_response(place)
         elif "!help" in message:
             response = self.get_help_response()
         else:
@@ -617,11 +630,50 @@ class BBSBotApp:
             except Exception as e:
                 return f"Error fetching news: {str(e)}"
 
+    def get_map_response(self, place):
+        """Fetch place info from Google Places API and return the response as a string."""
+        key = self.google_places_api_key.get()
+        if not key:
+            return "Google Places API key is missing."
+        elif not place:
+            return "Please specify a place."
+        else:
+            url = "https://places.googleapis.com/v1/places:searchText"
+            headers = {
+                "Content-Type": "application/json",
+                "X-Goog-Api-Key": key,
+                "X-Goog-FieldMask": "places.displayName,places.formattedAddress,places.types,places.websiteUri"
+            }
+            data = {
+                "textQuery": place
+            }
+            try:
+                r = requests.post(url, headers=headers, json=data, timeout=10)
+                r.raise_for_status()  # Raise an HTTPError for bad responses
+                data = r.json()
+                places = data.get("places", [])
+                if not places:
+                    return f"Could not find place '{place}'."
+                else:
+                    place_info = places[0]
+                    name = place_info.get("displayName", {}).get("text", "No Name")
+                    address = place_info.get("formattedAddress", "No Address")
+                    types = ", ".join(place_info.get("types", []))
+                    website = place_info.get("websiteUri", "No Website")
+                    return (
+                        f"Place: {name}\n"
+                        f"Address: {address}\n"
+                        f"Types: {types}\n"
+                        f"Website: {website}"
+                    )
+            except requests.exceptions.RequestException as e:
+                return f"Error fetching place info: {str(e)}"
+
     def get_help_response(self):
         """Return the help message as a string."""
         return (
             "Available commands: Please use a ! immediately followed by one of the following keywords (no space): "
-            "weather <location>, yt <query>, search <query>, chat <message>, news <topic>."
+            "weather <location>, yt <query>, search <query>, chat <message>, news <topic>, map <place>."
         )
 
     def append_terminal_text(self, text, default_tag="normal"):
@@ -706,15 +758,13 @@ class BBSBotApp:
         """Send a full message to the terminal display and the BBS server."""
         prefix = "Gos " if self.mud_mode.get() else ""
         lines = message.split('\n')
-        for line in lines:
-            line_with_prefix = prefix + line
-            self.append_terminal_text(line_with_prefix + "\n", "normal")
+        full_message = prefix + '\n'.join(lines)
+        chunks = self.chunk_message(full_message, 250)
+        for chunk in chunks:
+            self.append_terminal_text(chunk + "\n", "normal")
             if self.connected and self.writer:
-                if line.strip():  # Only send non-empty lines
-                    asyncio.run_coroutine_threadsafe(self._send_message(line_with_prefix + "\r\n"), self.loop)
-                    print(f"Sent to BBS: {line_with_prefix}")
-                else:
-                    print(f"Not connected. Failed to send: {line_with_prefix}")
+                asyncio.run_coroutine_threadsafe(self._send_message(chunk + "\r\n"), self.loop)
+                print(f"Sent to BBS: {chunk}")
 
     def chunk_message(self, message, chunk_size):
         """Chunk a message into specified size, ensuring no content is lost."""
@@ -898,6 +948,9 @@ class BBSBotApp:
             elif "!news" in clean_line:
                 topic = clean_line.split("!news", 1)[1].strip()
                 self.handle_news_command(topic)
+            elif "!map" in clean_line:
+                place = clean_line.split("!map", 1)[1].strip()
+                self.handle_map_command(place)
             elif "!help" in clean_line:
                 self.handle_help_command()
 
@@ -920,6 +973,9 @@ class BBSBotApp:
         elif "!news" in message:
             topic = message.split("!news", 1)[1].strip()
             response = self.get_news_response(topic)
+        elif "!map" in message:
+            place = message.split("!map", 1)[1].strip()
+            response = self.get_map_response(place)
         elif "!help" in message:
             response = self.get_help_response()
         else:
@@ -944,7 +1000,7 @@ class BBSBotApp:
         """Provide a list of available commands, adhering to character and chunk limits."""
         help_message = (
             "Available commands: Please use a ! immediately followed by one of the following keywords (no space): "
-            "weather <location>, yt <query>, search <query>, chat <message>, news <topic>."
+            "weather <location>, yt <query>, search <query>, chat <message>, news <topic>, map <place>."
         )
 
         # Send the help message as a single chunk if possible
@@ -1141,6 +1197,50 @@ class BBSBotApp:
                         response += f"{i + 1}. {title}\n   {description}\n   {link}\n\n"
             except Exception as e:
                 response = f"Error fetching news: {str(e)}"
+
+        self.send_full_message(response)
+
+    ########################################################################
+    #                           Map
+    ########################################################################
+    def handle_map_command(self, place):
+        """Fetch place info from Google Places API and return the response as a string."""
+        key = self.google_places_api_key.get()
+        if not key:
+            response = "Google Places API key is missing."
+        elif not place:
+            response = "Please specify a place."
+        else:
+            url = "https://places.googleapis.com/v1/places:searchText"
+            headers = {
+                "Content-Type": "application/json",
+                "X-Goog-Api-Key": key,
+                "X-Goog-FieldMask": "places.displayName,places.formattedAddress,places.types,places.websiteUri"
+            }
+            data = {
+                "textQuery": place
+            }
+            try:
+                r = requests.post(url, headers=headers, json=data, timeout=10)
+                r.raise_for_status()  # Raise an HTTPError for bad responses
+                data = r.json()
+                places = data.get("places", [])
+                if not places:
+                    response = f"Could not find place '{place}'."
+                else:
+                    place_info = places[0]
+                    name = place_info.get("displayName", {}).get("text", "No Name")
+                    address = place_info.get("formattedAddress", "No Address")
+                    types = ", ".join(place_info.get("types", []))
+                    website = place_info.get("websiteUri", "No Website")
+                    response = (
+                        f"Place: {name}\n"
+                        f"Address: {address}\n"
+                        f"Types: {types}\n"
+                        f"Website: {website}"
+                    )
+            except requests.exceptions.RequestException as e:
+                response = f"Error fetching place info: {str(e)}"
 
         self.send_full_message(response)
 

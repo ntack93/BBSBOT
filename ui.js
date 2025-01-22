@@ -42,6 +42,10 @@ document.addEventListener('DOMContentLoaded', function() {
     if (rememberPassword) {
         document.getElementById('passwordInput').value = localStorage.getItem('password') || '';
     }
+
+    // Load and set the state of the Google Places API key
+    const googlePlacesApiKey = localStorage.getItem('googlePlacesApiKey') || '';
+    document.getElementById('googlePlacesApiKey').value = googlePlacesApiKey;
 });
 
 document.getElementById('toggleModeButton').addEventListener('click', function() {
@@ -217,6 +221,15 @@ document.getElementById('sendPasswordButton').addEventListener('click', function
         localStorage.setItem('password', password);
     }
     sendMessage(password + '\r\n'); // Append carriage return and newline
+});
+
+// Save settings when the "Save" button is clicked
+document.getElementById('saveSettingsButton').addEventListener('click', function() {
+    // ...existing code...
+
+    // Save the Google Places API key
+    const googlePlacesApiKey = document.getElementById('googlePlacesApiKey').value;
+    localStorage.setItem('googlePlacesApiKey', googlePlacesApiKey);
 });
 
 // ...existing code...
