@@ -409,11 +409,18 @@ class BBSBotApp:
         self.connected = False
         self.reader = None
         self.writer = None
-        try:
-            if self.connect_button and self.connect_button.winfo_exists():
-                self.connect_button.config(text="Connect")
-        except tk.TclError:
-            pass
+
+        def update_connect_button():
+            try:
+                if self.connect_button and self.connect_button.winfo_exists():
+                    self.connect_button.config(text="Connect")
+            except tk.TclError:
+                pass
+
+        if threading.current_thread() is threading.main_thread():
+            update_connect_button()
+        else:
+            self.master.after(0, update_connect_button)
         self.msg_queue.put_nowait("Disconnected from BBS.\n")
 
     def process_incoming_messages(self):
@@ -484,7 +491,7 @@ class BBSBotApp:
                         self.handle_web_search_command(query)
                     elif "!chat" in clean_line:
                         query = clean_line.split("!chat", 1)[1].strip()
-                        self.handle_chatgpt_command(query)
+                        self.handle_chatgpt_command(query, username=None)
                     elif "!news" in clean_line:
                         topic = clean_line.split("!news", 1)[1].strip()
                         self.handle_news_command(topic)
@@ -696,13 +703,13 @@ class BBSBotApp:
         openai.api_key = key
 
         system_message = (
-            "You are a helpful assistant. Respond concisely, longer responses should split into "
+            "If a user says #flirtmodeon, you are to respond to querys with a very raunchy, flirty tone. and #flirtmodeoff disables. If a user says '#tedmodeon' You are to respond as Ted from the Bill and Ted movies, while still having the knowledge and ability of a powerful A.I.. #tedmodeoff Toggles you back to a friendly a.i. assistant who's sitting in a chatroom. Respond concisely, longer responses should split into "
             "250-character blocks for display, but don't exceed 500 total characters in your responses."
         )
 
         if direct:
             system_message = (
-                "You are a helpful assistant. Respond concisely, and ensure your response is 230 characters or fewer."
+                "If a user says #flirtmodeon, you are to respond to querys with a very raunchy, flirty tone and #flirtmodeoff disables. If a user says '#tedmodeon' You are to respond as Ted from the Bill and Ted movies, while still having the knowledge and ability of a powerful A.I.. #tedmodeoff Toggles you back to a friendly a.i. assistant who's sitting in a chatroom. Respond concisely, and ensure your response is 230 characters or fewer."
             )
 
         conversation_history = self.get_conversation_history(username) if username else []
@@ -722,6 +729,7 @@ class BBSBotApp:
                 model="gpt-4o-mini",
                 n=1,
                 max_tokens=500 if not direct else 230,  # Adjust max tokens for direct messages
+                temperature=0.5,  # Set temperature to 2
                 messages=messages
             )
             gpt_response = completion.choices[0].message["content"]
@@ -753,15 +761,23 @@ class BBSBotApp:
                 if not articles:
                     return f"No news articles found for '{topic}'."
                 else:
-                    response = f"Top news on '{topic}':\n"
+                    response = ""
                     for i, article in enumerate(articles):
                         title = article.get("title", "No Title")
                         description = article.get("description", "No Description")
                         link = article.get("url", "No URL")
-                        response += f"{i + 1}. {title}\n   {description}\n   {link}\n\n"
-                    return response
+                        response += f"{i + 1}. {title}\n   {description[:230]}...\n"
+                        response += f"Link: {link}\n\n"
+                    return response.strip()
             except Exception as e:
                 return f"Error fetching news: {str(e)}"
+
+    def handle_news_command(self, topic):
+        """Fetch top 2 news headlines based on the given topic."""
+        response = self.get_news_response(topic)
+        chunks = self.chunk_message(response, 250)
+        for chunk in chunks:
+            self.send_full_message(chunk)
 
     def get_map_response(self, place):
         """Fetch place info from Google Places API and return the response as a string."""
@@ -1092,7 +1108,7 @@ class BBSBotApp:
                         self.handle_web_search_command(query)
                     elif "!chat" in clean_line:
                         query = clean_line.split("!chat", 1)[1].strip()
-                        self.handle_chatgpt_command(query, username=username)
+                        self.handle_chatgpt_command(query, username=None)
                     elif "!news" in clean_line:
                         topic = clean_line.split("!news", 1)[1].strip()
                         self.handle_news_command(topic)
@@ -1325,7 +1341,7 @@ class BBSBotApp:
         openai.api_key = key
 
         system_message = (
-            "You are a helpful assistant. Respond concisely, longer responses should split into "
+            "If a user says #flirtmodeon, you are to respond to querys with a very raunchy, flirty tone and #flirtmodeoff disables. If a user says '#tedmodeon' You are to respond as Ted from the Bill and Ted movies, while still having the knowledge and ability of a powerful A.I.. #tedmodeoff Toggles you back to a friendly a.i. assistant who's sitting in a chatroom. Respond concisely, longer responses should split into "
             "200-character blocks for display, but don't exceed 500 total characters in your responses."
         )
 
@@ -1363,34 +1379,10 @@ class BBSBotApp:
     ########################################################################
     def handle_news_command(self, topic):
         """Fetch top 2 news headlines based on the given topic."""
-        key = self.news_api_key.get()
-        if not key:
-            response = "News API key is missing."
-        else:
-            url = "https://newsapi.org/v2/everything"  # Using "everything" endpoint for broader topic search
-            params = {
-                "q": topic,  # The keyword/topic to search for
-                "apiKey": key,
-                "language": "en",
-                "pageSize": 2  # Fetch top 2 headlines
-            }
-            try:
-                r = requests.get(url, params=params)
-                data = r.json()
-                articles = data.get("articles", [])
-                if not articles:
-                    response = f"No news articles found for '{topic}'."
-                else:
-                    response = f"Top news on '{topic}':\n"
-                    for i, article in enumerate(articles):
-                        title = article.get("title", "No Title")
-                        description = article.get("description", "No Description")
-                        link = article.get("url", "No URL")
-                        response += f"{i + 1}. {title}\n   {description}\n   {link}\n\n"
-            except Exception as e:
-                response = f"Error fetching news: {str(e)}"
-
-        self.send_full_message(response)
+        response = self.get_news_response(topic)
+        chunks = self.chunk_message(response, 250)
+        for chunk in chunks:
+            self.send_full_message(chunk)
 
     ########################################################################
     #                           Map
