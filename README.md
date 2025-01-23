@@ -15,12 +15,14 @@ BBS Chat Bot is a Python application that functions as a BBS Teleconference Bot.
 - Use `!news <topic>` for news searches via newsapi.org.
 - Use `!map <place>` to fetch place information from Google Places API.
 - Use `/P <username> <message>` to send and receive pages with query responses.
+- **NEW**: Conversation persistence using DynamoDB.
 
 ## Requirements
 
 - Python 3.x
 - Tkinter (usually included with Python)
 - `asyncio` for asynchronous operations
+- `boto3` for AWS DynamoDB integration
 
 ## Installation
 
@@ -91,6 +93,25 @@ To use the various `!triggers` in the bot, you need to set up API keys for diffe
 2. Create a new project and enable the Places API.
 3. Generate an API key for the project.
 4. Copy the API key and enter it in the Settings window under "Google Places API Key".
+
+## DynamoDB Setup
+
+To enable conversation persistence using DynamoDB, follow these steps:
+
+1. Sign up for an account at [AWS](https://aws.amazon.com/).
+2. Navigate to the DynamoDB service in the AWS Management Console.
+3. Create a new table with the following settings:
+    - **Table name**: `ChatBotConversations`
+    - **Primary key**:
+        - **Partition key**: `username` (Type: String)
+        - **Sort key**: `timestamp` (Type: Number)
+4. Configure your AWS credentials:
+    - Install the AWS CLI: [AWS CLI Installation](https://docs.aws.amazon.com/cli/latest/userguide/install-cliv2.html)
+    - Configure the AWS CLI with your credentials:
+        ```sh
+        aws configure
+        ```
+    - Enter your AWS Access Key ID, Secret Access Key, region (e.g., `us-east-1`), and output format (e.g., `json`).
 
 ## Usage
 

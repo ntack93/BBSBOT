@@ -10,6 +10,8 @@ import requests
 import openai
 import json
 import os
+import boto3
+from botocore.exceptions import NoCredentialsError, PartialCredentialsError
 
 ###############################################################################
 # Default/placeholder API keys (updated in Settings window as needed).
@@ -21,6 +23,11 @@ DEFAULT_GOOGLE_CSE_KEY = ""  # Google Custom Search API Key
 DEFAULT_GOOGLE_CSE_CX = ""   # Google Custom Search Engine ID (cx)
 DEFAULT_NEWS_API_KEY = ""  # NewsAPI Key
 DEFAULT_GOOGLE_PLACES_API_KEY = ""  # Google Places API Key
+
+# Initialize DynamoDB client
+dynamodb = boto3.resource('dynamodb', region_name='us-east-1')
+table_name = 'ChatBotConversations'
+table = dynamodb.Table(table_name)
 
 class BBSBotApp:
     def __init__(self, master):
@@ -78,8 +85,51 @@ class BBSBotApp:
         self.loop = asyncio.new_event_loop()  # Initialize loop attribute
         asyncio.set_event_loop(self.loop)  # Set the event loop
 
-    
-        
+        self.dynamodb_client = boto3.client('dynamodb', region_name='us-east-1')
+        self.table_name = table_name
+        self.create_dynamodb_table()
+
+    def create_dynamodb_table(self):
+        """Create DynamoDB table if it doesn't exist."""
+        try:
+            self.dynamodb_client.describe_table(TableName=self.table_name)
+        except self.dynamodb_client.exceptions.ResourceNotFoundException:
+            self.dynamodb_client.create_table(
+                TableName=self.table_name,
+                KeySchema=[
+                    {'AttributeName': 'username', 'KeyType': 'HASH'},
+                    {'AttributeName': 'timestamp', 'KeyType': 'RANGE'}
+                ],
+                AttributeDefinitions=[
+                    {'AttributeName': 'username', 'AttributeType': 'S'},
+                    {'AttributeName': 'timestamp', 'AttributeType': 'N'}
+                ],
+                ProvisionedThroughput={
+                    'ReadCapacityUnits': 5,
+                    'WriteCapacityUnits': 5
+                }
+            )
+            self.dynamodb_client.get_waiter('table_exists').wait(TableName=self.table_name)
+
+    def save_conversation(self, username, message, response):
+        """Save conversation to DynamoDB."""
+        timestamp = int(time.time())
+        table.put_item(
+            Item={
+                'username': username,
+                'timestamp': timestamp,
+                'message': message,
+                'response': response
+            }
+        )
+
+    def get_conversation_history(self, username):
+        """Retrieve conversation history from DynamoDB."""
+        response = table.query(
+            KeyConditionExpression=boto3.dynamodb.conditions.Key('username').eq(username)
+        )
+        return response.get('Items', [])
+
     def build_ui(self):
         """Set up frames, text areas, input boxes, etc."""
         main_frame = ttk.Frame(self.master)
@@ -459,7 +509,7 @@ class BBSBotApp:
             response = self.get_web_search_response(query)
         elif "!chat" in message:
             query = message.split("!chat", 1)[1].strip()
-            response = self.get_chatgpt_response(query)
+            response = self.get_chatgpt_response(query, username=username)
         elif "!news" in message:
             topic = message.split("!news", 1)[1].strip()
             response = self.get_news_response(topic)
@@ -498,7 +548,7 @@ class BBSBotApp:
             response = self.get_web_search_response(query)
         elif "!chat" in message:
             query = message.split("!chat", 1)[1].strip()
-            response = self.get_chatgpt_response(query)
+            response = self.get_chatgpt_response(query, username=username)
         elif "!news" in message:
             topic = message.split("!news", 1)[1].strip()
             response = self.get_news_response(topic)
@@ -526,7 +576,7 @@ class BBSBotApp:
         """
         Handle direct messages and interpret them as !chat queries.
         """
-        response = self.get_chatgpt_response(message, direct=True)
+        response = self.get_chatgpt_response(message, direct=True, username=username)
         self.send_direct_message(username, response)
 
     def send_direct_message(self, username, message):
@@ -637,7 +687,7 @@ class BBSBotApp:
             except Exception as e:
                 return f"Error with Google search: {str(e)}"
 
-    def get_chatgpt_response(self, user_text, direct=False):
+    def get_chatgpt_response(self, user_text, direct=False, username=None):
         """Send user_text to ChatGPT and return the response as a string."""
         key = self.openai_api_key.get()
         if not key:
@@ -655,26 +705,33 @@ class BBSBotApp:
                 "You are a helpful assistant. Respond concisely, and ensure your response is 230 characters or fewer."
             )
 
+        conversation_history = self.get_conversation_history(username) if username else []
+
+        messages = [
+            {"role": "system", "content": system_message}
+        ] + [
+            {"role": "user", "content": item['message']} for item in conversation_history
+        ] + [
+            {"role": "assistant", "content": item['response']} for item in conversation_history
+        ] + [
+            {"role": "user", "content": user_text}
+        ]
+
         try:
             completion = openai.ChatCompletion.create(
                 model="gpt-4o-mini",
                 n=1,
                 max_tokens=500 if not direct else 230,  # Adjust max tokens for direct messages
-                messages=[
-                    {
-                        "role": "system",
-                        "content": system_message
-                    },
-                    {
-                        "role": "user",
-                        "content": user_text
-                    }
-                ]
+                messages=messages
             )
-            return completion.choices[0].message["content"]
+            gpt_response = completion.choices[0].message["content"]
+            if username:
+                self.save_conversation(username, user_text, gpt_response)
 
         except Exception as e:
-            return f"Error with ChatGPT API: {str(e)}"
+            gpt_response = f"Error with ChatGPT API: {str(e)}"
+
+        return gpt_response
 
     def get_news_response(self, topic):
         """Fetch top 2 news headlines and return the response as a string."""
@@ -1035,7 +1092,7 @@ class BBSBotApp:
                         self.handle_web_search_command(query)
                     elif "!chat" in clean_line:
                         query = clean_line.split("!chat", 1)[1].strip()
-                        self.handle_chatgpt_command(query)
+                        self.handle_chatgpt_command(query, username=username)
                     elif "!news" in clean_line:
                         topic = clean_line.split("!news", 1)[1].strip()
                         self.handle_news_command(topic)
@@ -1060,7 +1117,7 @@ class BBSBotApp:
             response = self.get_web_search_response(query)
         elif "!chat" in message:
             query = message.split("!chat", 1)[1].strip()
-            response = self.get_chatgpt_response(query)
+            response = self.get_chatgpt_response(query, username=username)
         elif "!news" in message:
             topic = message.split("!news", 1)[1].strip()
             response = self.get_news_response(topic)
@@ -1099,7 +1156,7 @@ class BBSBotApp:
             response = self.get_web_search_response(query)
         elif "!chat" in message:
             query = message.split("!chat", 1)[1].strip()
-            response = self.get_chatgpt_response(query)
+            response = self.get_chatgpt_response(query, username=username)
         elif "!news" in message:
             topic = message.split("!news", 1)[1].strip()
             response = self.get_news_response(topic)
@@ -1254,7 +1311,7 @@ class BBSBotApp:
     ########################################################################
     #                           ChatGPT
     ########################################################################
-    def handle_chatgpt_command(self, user_text):
+    def handle_chatgpt_command(self, user_text, username=None):
         """
         Send user_text to ChatGPT and handle responses.
         The response can be longer than 200 characters but will be split into blocks.
@@ -1272,23 +1329,28 @@ class BBSBotApp:
             "200-character blocks for display, but don't exceed 500 total characters in your responses."
         )
 
+        conversation_history = self.get_conversation_history(username) if username else []
+
+        messages = [
+            {"role": "system", "content": system_message}
+        ] + [
+            {"role": "user", "content": item['message']} for item in conversation_history
+        ] + [
+            {"role": "assistant", "content": item['response']} for item in conversation_history
+        ] + [
+            {"role": "user", "content": user_text}
+        ]
+
         try:
             completion = openai.ChatCompletion.create(
                 model="gpt-4o-mini",
                 n=1,
                 max_tokens=500,  # Allow for longer responses
-                messages=[
-                    {
-                        "role": "system",
-                        "content": system_message
-                    },
-                    {
-                        "role": "user",
-                        "content": user_text
-                    }
-                ]
+                messages=messages
             )
             gpt_response = completion.choices[0].message["content"]
+            if username:
+                self.save_conversation(username, user_text, gpt_response)
 
         except Exception as e:
             gpt_response = f"Error with ChatGPT API: {str(e)}"
