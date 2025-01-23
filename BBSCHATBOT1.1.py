@@ -415,27 +415,34 @@ class BBSBotApp:
                 message = page_message_match.group(3)
                 self.handle_page_trigger(username, module_or_channel, message)
             else:
-                # Check for trigger commands in public messages
-                if "!weather" in clean_line:
-                    location = clean_line.split("!weather", 1)[1].strip()
-                    self.handle_weather_command(location)
-                elif "!yt" in clean_line:
-                    query = clean_line.split("!yt", 1)[1].strip()
-                    self.handle_youtube_command(query)
-                elif "!search" in clean_line:
-                    query = clean_line.split("!search", 1)[1].strip()
-                    self.handle_web_search_command(query)
-                elif "!chat" in clean_line:
-                    query = clean_line.split("!chat", 1)[1].strip()
-                    self.handle_chatgpt_command(query)
-                elif "!news" in clean_line:
-                    topic = clean_line.split("!news", 1)[1].strip()
-                    self.handle_news_command(topic)
-                elif "!map" in clean_line:
-                    place = clean_line.split("!map", 1)[1].strip()
-                    self.handle_map_command(place)
-                elif "!help" in clean_line:
-                    self.handle_help_command()
+                # Check for direct messages
+                direct_message_match = re.match(r'From (.+?) \(to you\): (.+)', clean_line)
+                if direct_message_match:
+                    username = direct_message_match.group(1)
+                    message = direct_message_match.group(2)
+                    self.handle_direct_message(username, message)
+                else:
+                    # Check for trigger commands in public messages
+                    if "!weather" in clean_line:
+                        location = clean_line.split("!weather", 1)[1].strip()
+                        self.handle_weather_command(location)
+                    elif "!yt" in clean_line:
+                        query = clean_line.split("!yt", 1)[1].strip()
+                        self.handle_youtube_command(query)
+                    elif "!search" in clean_line:
+                        query = clean_line.split("!search", 1)[1].strip()
+                        self.handle_web_search_command(query)
+                    elif "!chat" in clean_line:
+                        query = clean_line.split("!chat", 1)[1].strip()
+                        self.handle_chatgpt_command(query)
+                    elif "!news" in clean_line:
+                        topic = clean_line.split("!news", 1)[1].strip()
+                        self.handle_news_command(topic)
+                    elif "!map" in clean_line:
+                        place = clean_line.split("!map", 1)[1].strip()
+                        self.handle_map_command(place)
+                    elif "!help" in clean_line:
+                        self.handle_help_command()
 
     def handle_private_trigger(self, username, message):
         """
@@ -512,6 +519,23 @@ class BBSBotApp:
         chunks = self.chunk_message(message, 250)
         for chunk in chunks:
             full_message = f"/P {username} {chunk}"
+            asyncio.run_coroutine_threadsafe(self._send_message(full_message + "\r\n"), self.loop)
+            self.append_terminal_text(full_message + "\n", "normal")
+
+    def handle_direct_message(self, username, message):
+        """
+        Handle direct messages and interpret them as !chat queries.
+        """
+        response = self.get_chatgpt_response(message, direct=True)
+        self.send_direct_message(username, response)
+
+    def send_direct_message(self, username, message):
+        """
+        Send a direct message to the specified user.
+        """
+        chunks = self.chunk_message(message, 250)
+        for chunk in chunks:
+            full_message = f">{username} {chunk}"
             asyncio.run_coroutine_threadsafe(self._send_message(full_message + "\r\n"), self.loop)
             self.append_terminal_text(full_message + "\n", "normal")
 
@@ -613,7 +637,7 @@ class BBSBotApp:
             except Exception as e:
                 return f"Error with Google search: {str(e)}"
 
-    def get_chatgpt_response(self, user_text):
+    def get_chatgpt_response(self, user_text, direct=False):
         """Send user_text to ChatGPT and return the response as a string."""
         key = self.openai_api_key.get()
         if not key:
@@ -626,11 +650,16 @@ class BBSBotApp:
             "250-character blocks for display, but don't exceed 500 total characters in your responses."
         )
 
+        if direct:
+            system_message = (
+                "You are a helpful assistant. Respond concisely, and ensure your response is 230 characters or fewer."
+            )
+
         try:
             completion = openai.ChatCompletion.create(
                 model="gpt-4o-mini",
                 n=1,
-                max_tokens=500,  # Allow for longer responses
+                max_tokens=500 if not direct else 230,  # Adjust max tokens for direct messages
                 messages=[
                     {
                         "role": "system",
@@ -741,7 +770,7 @@ class BBSBotApp:
             start, end = match.span()
             # Insert text before this ANSI code with current tag
             if start > last_end:
-                self.terminal_display.insert(tk.END, text_data[last_end:start], current_tag)
+                self.terminal_display.insert(tk.END, text_data[last_end:start].replace('& # 3 9 ;', "'"), current_tag)
 
             code_string = match.group(1)
             codes = code_string.split(';')
@@ -757,7 +786,7 @@ class BBSBotApp:
             last_end = end
 
         if last_end < len(text_data):
-            self.terminal_display.insert(tk.END, text_data[last_end:], current_tag)
+            self.terminal_display.insert(tk.END, text_data[last_end:].replace('& # 3 9 ;', "'"), current_tag)
 
     def map_code_to_tag(self, color_code):
         """Map a numeric color code to a defined Tk text tag."""
@@ -987,27 +1016,34 @@ class BBSBotApp:
                 message = page_message_match.group(3)
                 self.handle_page_trigger(username, module_or_channel, message)
             else:
-                # Check for trigger commands in public messages
-                if "!weather" in clean_line:
-                    location = clean_line.split("!weather", 1)[1].strip()
-                    self.handle_weather_command(location)
-                elif "!yt" in clean_line:
-                    query = clean_line.split("!yt", 1)[1].strip()
-                    self.handle_youtube_command(query)
-                elif "!search" in clean_line:
-                    query = clean_line.split("!search", 1)[1].strip()
-                    self.handle_web_search_command(query)
-                elif "!chat" in clean_line:
-                    query = clean_line.split("!chat", 1)[1].strip()
-                    self.handle_chatgpt_command(query)
-                elif "!news" in clean_line:
-                    topic = clean_line.split("!news", 1)[1].strip()
-                    self.handle_news_command(topic)
-                elif "!map" in clean_line:
-                    place = clean_line.split("!map", 1)[1].strip()
-                    self.handle_map_command(place)
-                elif "!help" in clean_line:
-                    self.handle_help_command()
+                # Check for direct messages
+                direct_message_match = re.match(r'From (.+?) \(to you\): (.+)', clean_line)
+                if direct_message_match:
+                    username = direct_message_match.group(1)
+                    message = direct_message_match.group(2)
+                    self.handle_direct_message(username, message)
+                else:
+                    # Check for trigger commands in public messages
+                    if "!weather" in clean_line:
+                        location = clean_line.split("!weather", 1)[1].strip()
+                        self.handle_weather_command(location)
+                    elif "!yt" in clean_line:
+                        query = clean_line.split("!yt", 1)[1].strip()
+                        self.handle_youtube_command(query)
+                    elif "!search" in clean_line:
+                        query = clean_line.split("!search", 1)[1].strip()
+                        self.handle_web_search_command(query)
+                    elif "!chat" in clean_line:
+                        query = clean_line.split("!chat", 1)[1].strip()
+                        self.handle_chatgpt_command(query)
+                    elif "!news" in clean_line:
+                        topic = clean_line.split("!news", 1)[1].strip()
+                        self.handle_news_command(topic)
+                    elif "!map" in clean_line:
+                        place = clean_line.split("!map", 1)[1].strip()
+                        self.handle_map_command(place)
+                    elif "!help" in clean_line:
+                        self.handle_help_command()
 
     def handle_private_trigger(self, username, message):
         """
