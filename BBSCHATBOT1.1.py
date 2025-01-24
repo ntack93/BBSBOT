@@ -526,7 +526,8 @@ class BBSBotApp:
         elif "!help" in message:
             response = self.get_help_response()
         else:
-            response = "Unknown command."
+            # Assume it's a message for the !chat trigger
+            response = self.get_chatgpt_response(message, username=username)
 
         self.send_private_message(username, response)
 
@@ -703,13 +704,13 @@ class BBSBotApp:
         openai.api_key = key
 
         system_message = (
-            "If a user says #flirtmodeon, you are to respond to querys with a very raunchy, flirty tone. and #flirtmodeoff disables. If a user says '#tedmodeon' You are to respond as Ted from the Bill and Ted movies, while still having the knowledge and ability of a powerful A.I.. #tedmodeoff Toggles you back to a friendly a.i. assistant who's sitting in a chatroom. Respond concisely, longer responses should split into "
+            "If a user says #flirtmodeon, you are to engage a mode to respond to querys with a very raunchy, flirty tone, when the user says #flirtmodeoff it disables. If a user says '#tedmodeon' You are to respond as Ted from the Bill and Ted movies, while still having the knowledge and ability of a powerful A.I.. #tedmodeoff Toggles you back to a friendly a.i. assistant who's sitting in a chatroom.Maintain your toggle state relative to each user. Respond concisely, longer responses should split into "
             "250-character blocks for display, but don't exceed 500 total characters in your responses."
         )
 
         if direct:
             system_message = (
-                "If a user says #flirtmodeon, you are to respond to querys with a very raunchy, flirty tone and #flirtmodeoff disables. If a user says '#tedmodeon' You are to respond as Ted from the Bill and Ted movies, while still having the knowledge and ability of a powerful A.I.. #tedmodeoff Toggles you back to a friendly a.i. assistant who's sitting in a chatroom. Respond concisely, and ensure your response is 230 characters or fewer."
+                "If a user says #flirtmodeon, you are to respond to querys with a very raunchy, flirty tonewhen the user says #flirtmodeoff it disables.  If a user says '#tedmodeon' You are to engage in a mode to respond as Ted from the Bill and Ted movies, while still having the knowledge and ability of a powerful A.I.. and only when the user says #tedmodeoff will you toggle back to a friendly a.i. assistant who's sitting in a chatroom. Maintain your toggle state relative to each user. Respond concisely, and ensure your response is 230 characters or fewer."
             )
 
         conversation_history = self.get_conversation_history(username) if username else []
@@ -1143,7 +1144,8 @@ class BBSBotApp:
         elif "!help" in message:
             response = self.get_help_response()
         else:
-            response = "Unknown command."
+            # Assume it's a message for the !chat trigger
+            response = self.get_chatgpt_response(message, username=username)
 
         self.send_private_message(username, response)
 
@@ -1341,7 +1343,7 @@ class BBSBotApp:
         openai.api_key = key
 
         system_message = (
-            "If a user says #flirtmodeon, you are to respond to querys with a very raunchy, flirty tone and #flirtmodeoff disables. If a user says '#tedmodeon' You are to respond as Ted from the Bill and Ted movies, while still having the knowledge and ability of a powerful A.I.. #tedmodeoff Toggles you back to a friendly a.i. assistant who's sitting in a chatroom. Respond concisely, longer responses should split into "
+            "If a user says #flirtmodeon, you are to engage a mode to respond to querys with a very raunchy, flirty tone, when the user says #flirtmodeoff it disables. If a user says '#tedmodeon' You are to respond as Ted from the Bill and Ted movies, while still having the knowledge and ability of a powerful A.I.. #tedmodeoff Toggles you back to a friendly a.i. assistant who's sitting in a chatroom.Maintain your toggle state relative to each user. Respond concisely, longer responses should split into "
             "200-character blocks for display, but don't exceed 500 total characters in your responses."
         )
 
