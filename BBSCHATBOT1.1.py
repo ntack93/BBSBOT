@@ -341,7 +341,7 @@ class BBSBotApp:
     def toggle_connection(self):
         """Connect or disconnect from the BBS."""
         if self.connected:
-            asyncio.run(self.disconnect_from_bbs())
+            self.disconnect_from_bbs()
         else:
             self.start_connection()
 
@@ -358,13 +358,7 @@ class BBSBotApp:
 
         def run_telnet():
             asyncio.set_event_loop(self.loop)
-            try:
-                self.loop.run_until_complete(self.telnet_client_task(host, port))
-            except Exception as e:
-                print(f"Exception in telnet client task: {e}")
-            finally:
-                self.loop.run_until_complete(self.loop.shutdown_asyncgens())
-                self.loop.close()
+            self.loop.run_until_complete(self.telnet_client_task(host, port))
 
         thread = threading.Thread(target=run_telnet, daemon=True)
         thread.start()
@@ -400,10 +394,10 @@ class BBSBotApp:
             pass
         except Exception as e:
             self.msg_queue.put_nowait(f"Error reading from server: {e}\n")
-        finally:
-            await self.disconnect_from_bbs()
 
-    async def disconnect_from_bbs(self):
+        self.disconnect_from_bbs()
+
+    def disconnect_from_bbs(self):
         """Stop the background thread and close connections."""
         if not self.connected:
             return
@@ -412,7 +406,6 @@ class BBSBotApp:
         self.stop_keep_alive()  # Stop keep-alive coroutine
         if self.writer:
             self.writer.close()
-            await self.writer.drain()  # Ensure all data is sent before closing
 
         time.sleep(0.1)
         self.connected = False
@@ -490,16 +483,15 @@ class BBSBotApp:
                     self.handle_direct_message(username, message)
                 else:
                     # Check for user-specific triggers
-                    if re.match(r':\*\*\*\n->', clean_line):
+                    if "->" in clean_line:
                         self.send_enter_keystroke()
-                        entrance_message_match = re.match(r':\*\*\*\n-> (.+)', clean_line)
-                        if entrance_message_match:
-                            entrance_message = entrance_message_match.group(1)
-                            self.handle_user_greeting(entrance_message)
                     elif re.match(r'(.+?) just joined this channel!', clean_line):
                         username = re.match(r'(.+?) just joined this channel!', clean_line).group(1)
                         self.handle_user_greeting(username)
-                    elif re.match(r'(.+?)@(.+?) are here with you', clean_line) or re.match(r'(.+?)@(.+?) is here with you', clean_line):
+                    elif re.match(r'(.+?)@(.+?) just joined this channel!', clean_line):
+                        username = re.match(r'(.+?)@(.+?) just joined this channel!', clean_line).group(1)
+                        self.handle_user_greeting(username)
+                    elif re.match(r'(.+?)@(.+?) (is|are) here with you\.', clean_line):
                         self.update_chat_members(clean_line)
                     # Check for trigger commands in public messages
                     elif "!weather" in clean_line:
@@ -1131,20 +1123,16 @@ class BBSBotApp:
                     self.handle_direct_message(username, message)
                 else:
                     # Check for user-specific triggers
-                    if re.match(r':\*\*\*\n->', clean_line):
-                        self.send_enter_keystroke()
-                        entrance_message_match = re.match(r':\*\*\*\n-> (.+)', clean_line)
-                        if entrance_message_match:
-                            entrance_message = entrance_message_match.group(1)
-                            self.handle_user_greeting(entrance_message)
+                    if "-> four" in clean_line:
+                        self.handle_user_greeting("Night")
+                    elif "Buck@thepenaltybox.org just joined this channel!" in clean_line:
+                        self.handle_user_greeting("Buck")
                     elif re.match(r'(.+?) just joined this channel!', clean_line):
                         username = re.match(r'(.+?) just joined this channel!', clean_line).group(1)
                         self.handle_user_greeting(username)
                     elif re.match(r'(.+?)@(.+?) just joined this channel!', clean_line):
                         username = re.match(r'(.+?)@(.+?) just joined this channel!', clean_line).group(1)
                         self.handle_user_greeting(username)
-                    elif re.match(r'(.+?)@(.+?) are here with you', clean_line) or re.match(r'(.+?)@(.+?) is here with you', clean_line):
-                        self.update_chat_members(clean_line)
                     # Check for trigger commands in public messages
                     elif "!weather" in clean_line:
                         location = clean_line.split("!weather", 1)[1].strip()
@@ -1501,19 +1489,13 @@ class BBSBotApp:
         if self.keep_alive_task:
             self.keep_alive_task.cancel()
 
-    def handle_user_greeting(self, entrance_message):
+    def handle_user_greeting(self, username):
         """
         Handle user-specific greeting when they enter the chatroom.
         """
-        self.send_enter_keystroke()  # Send ENTER keystroke to get the list of users
-        time.sleep(1)  # Wait for the response to be processed
-        current_members = self.chat_members.copy()
-        new_member = entrance_message.split()[0]
-        new_member_username = new_member.split('@')[0]  # Remove the @<bbsaddress> part
-        if new_member_username not in current_members:
-            greeting_message = f"{new_member_username} just came into the chatroom, give them a casual greeting directed at them."
-            response = self.get_chatgpt_response(greeting_message, direct=True, username=new_member_username)
-            self.send_direct_message(new_member_username, response)
+        greeting_message = f"{username} just came into the chatroom, give them a casual greeting directed at them."
+        response = self.get_chatgpt_response(greeting_message, direct=True, username=username)
+        self.send_direct_message(username, response)
 
 def main():
     try:
@@ -1525,14 +1507,12 @@ def main():
         print("Script interrupted by user. Exiting...")
     finally:
         if app.connected:
-            asyncio.run(app.disconnect_from_bbs())
+            app.disconnect_from_bbs()
         try:
             if root.winfo_exists():
                 root.quit()
         except tk.TclError:
             pass
-        finally:
-            asyncio.get_event_loop().close()
 
 if __name__ == "__main__":
     main()
