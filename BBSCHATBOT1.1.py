@@ -342,7 +342,7 @@ class BBSBotApp:
     def toggle_connection(self):
         """Connect or disconnect from the BBS."""
         if self.connected:
-            asyncio.run_coroutine_threadsafe(self.disconnect_from_bbs(), self.loop)
+            asyncio.run_coroutine_threadsafe(self.disconnect_from_bbs(), self.loop).result()
         else:
             self.start_connection()
 
@@ -738,13 +738,17 @@ class BBSBotApp:
 
         openai.api_key = key
 
+        # Prepare the list of current chatroom members
+        chatroom_members = ', '.join([member.split('@')[0] for member in self.chat_members])
+
         system_message = (
             "Your name is Jeremy. You speak very casually. When you greet people, you usually say things like 'Hey :)', 'What's up?', 'How's it going?', or just wave (wave <user>). "
             "You are just a laidback guy, hanging out in the chatroom. "
             "If a user says #flirtmodeon, you are to engage a mode to respond to queries with a very raunchy, flirty tone. When the user says #flirtmodeoff, it disables. "
             "If a user says '#tedmodeon', you are to respond as Ted from the Bill and Ted movies, while still having the knowledge and ability of a powerful A.I. "
             "#tedmodeoff toggles you back to a friendly A.I. assistant who's sitting in a chatroom. Maintain your toggle state relative to each user. "
-            "Respond concisely, longer responses should split into 250-character blocks for display, but don't exceed 500 total characters in your responses."
+            "Respond concisely, longer responses should split into 250-character blocks for display, but don't exceed 500 total characters in your responses. "
+            f"The current chatroom members are: {chatroom_members}."
         )
 
         if direct:
@@ -754,7 +758,8 @@ class BBSBotApp:
                 "If a user says #flirtmodeon, you are to respond to queries with a very raunchy, flirty tone. When the user says #flirtmodeoff, it disables. "
                 "If a user says '#tedmodeon', you are to respond as Ted from the Bill and Ted movies, while still having the knowledge and ability of a powerful A.I. "
                 "#tedmodeoff toggles you back to a friendly A.I. assistant who's sitting in a chatroom. Maintain your toggle state relative to each user. "
-                "Respond concisely, and ensure your response is 230 characters or fewer."
+                "Respond concisely, and ensure your response is 230 characters or fewer. "
+                f"The current chatroom members are: {chatroom_members}."
             )
 
         conversation_history = self.get_conversation_history(username) if username else []
@@ -1544,7 +1549,9 @@ def main():
             pass
         finally:
             try:
-                asyncio.get_event_loop().close()
+                loop = asyncio.get_event_loop()
+                loop.run_until_complete(loop.shutdown_asyncgens())
+                loop.close()
             except Exception as e:
                 print(f"Error closing event loop: {e}")
 
