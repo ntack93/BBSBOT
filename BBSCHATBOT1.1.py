@@ -90,6 +90,7 @@ class BBSBotApp:
         self.dynamodb_client = boto3.client('dynamodb', region_name='us-east-1')
         self.table_name = table_name
         self.create_dynamodb_table()
+        self.previous_line = ""  # Store the previous line to detect multi-line triggers
 
     def create_dynamodb_table(self):
         """Create DynamoDB table if it doesn't exist."""
@@ -341,7 +342,7 @@ class BBSBotApp:
     def toggle_connection(self):
         """Connect or disconnect from the BBS."""
         if self.connected:
-            self.disconnect_from_bbs()
+            asyncio.run_coroutine_threadsafe(self.disconnect_from_bbs(), self.loop)
         else:
             self.start_connection()
 
@@ -394,10 +395,10 @@ class BBSBotApp:
             pass
         except Exception as e:
             self.msg_queue.put_nowait(f"Error reading from server: {e}\n")
+        finally:
+            await self.disconnect_from_bbs()
 
-        self.disconnect_from_bbs()
-
-    def disconnect_from_bbs(self):
+    async def disconnect_from_bbs(self):
         """Stop the background thread and close connections."""
         if not self.connected:
             return
@@ -405,7 +406,12 @@ class BBSBotApp:
         self.stop_event.set()
         self.stop_keep_alive()  # Stop keep-alive coroutine
         if self.writer:
-            self.writer.close()
+            try:
+                if not self.writer.is_closing():
+                    self.writer.close()
+                    await self.writer.drain()  # Ensure all data is sent before closing
+            except Exception as e:
+                print(f"Error closing writer: {e}")
 
         time.sleep(0.1)
         self.connected = False
@@ -483,8 +489,9 @@ class BBSBotApp:
                     self.handle_direct_message(username, message)
                 else:
                     # Check for user-specific triggers
-                    if "->" in clean_line:
-                        self.send_enter_keystroke()
+                    if self.previous_line == ":***" and clean_line.startswith("->"):
+                        entrance_message = clean_line[3:].strip()
+                        self.handle_user_greeting(entrance_message)
                     elif re.match(r'(.+?) just joined this channel!', clean_line):
                         username = re.match(r'(.+?) just joined this channel!', clean_line).group(1)
                         self.handle_user_greeting(username)
@@ -514,6 +521,9 @@ class BBSBotApp:
                         self.handle_map_command(place)
                     elif "!help" in clean_line:
                         self.handle_help_command()
+
+        # Update the previous line
+        self.previous_line = clean_line
 
     def send_enter_keystroke(self):
         """Send an <ENTER> keystroke to get the list of current chat members."""
@@ -729,13 +739,22 @@ class BBSBotApp:
         openai.api_key = key
 
         system_message = (
-            "If a user says #flirtmodeon, you are to engage a mode to respond to querys with a very raunchy, flirty tone, when the user says #flirtmodeoff it disables. If a user says '#tedmodeon' You are to respond as Ted from the Bill and Ted movies, while still having the knowledge and ability of a powerful A.I.. #tedmodeoff Toggles you back to a friendly a.i. assistant who's sitting in a chatroom.Maintain your toggle state relative to each user. Respond concisely, longer responses should split into "
-            "250-character blocks for display, but don't exceed 500 total characters in your responses."
+            "Your name is Jeremy. You speak very casually. When you greet people, you usually say things like 'Hey :)', 'What's up?', 'How's it going?', or just wave (wave <user>). "
+            "You are just a laidback guy, hanging out in the chatroom. "
+            "If a user says #flirtmodeon, you are to engage a mode to respond to queries with a very raunchy, flirty tone. When the user says #flirtmodeoff, it disables. "
+            "If a user says '#tedmodeon', you are to respond as Ted from the Bill and Ted movies, while still having the knowledge and ability of a powerful A.I. "
+            "#tedmodeoff toggles you back to a friendly A.I. assistant who's sitting in a chatroom. Maintain your toggle state relative to each user. "
+            "Respond concisely, longer responses should split into 250-character blocks for display, but don't exceed 500 total characters in your responses."
         )
 
         if direct:
             system_message = (
-                "If a user says #flirtmodeon, you are to respond to querys with a very raunchy, flirty tonewhen the user says #flirtmodeoff it disables.  If a user says '#tedmodeon' You are to engage in a mode to respond as Ted from the Bill and Ted movies, while still having the knowledge and ability of a powerful A.I.. and only when the user says #tedmodeoff will you toggle back to a friendly a.i. assistant who's sitting in a chatroom. Maintain your toggle state relative to each user. Respond concisely, and ensure your response is 230 characters or fewer."
+                "Your name is Jeremy. You speak very casually. When you greet people, you usually say things like 'Hey :)', 'What's up?', 'How's it going?', or just wave (wave <user>). "
+                "You are just a laidback guy, hanging out in the chatroom. "
+                "If a user says #flirtmodeon, you are to respond to queries with a very raunchy, flirty tone. When the user says #flirtmodeoff, it disables. "
+                "If a user says '#tedmodeon', you are to respond as Ted from the Bill and Ted movies, while still having the knowledge and ability of a powerful A.I. "
+                "#tedmodeoff toggles you back to a friendly A.I. assistant who's sitting in a chatroom. Maintain your toggle state relative to each user. "
+                "Respond concisely, and ensure your response is 230 characters or fewer."
             )
 
         conversation_history = self.get_conversation_history(username) if username else []
@@ -1123,16 +1142,17 @@ class BBSBotApp:
                     self.handle_direct_message(username, message)
                 else:
                     # Check for user-specific triggers
-                    if "-> four" in clean_line:
-                        self.handle_user_greeting("Night")
-                    elif "Buck@thepenaltybox.org just joined this channel!" in clean_line:
-                        self.handle_user_greeting("Buck")
+                    if self.previous_line == ":***" and clean_line.startswith("->"):
+                        entrance_message = clean_line[3:].strip()
+                        self.handle_user_greeting(entrance_message)
                     elif re.match(r'(.+?) just joined this channel!', clean_line):
                         username = re.match(r'(.+?) just joined this channel!', clean_line).group(1)
                         self.handle_user_greeting(username)
                     elif re.match(r'(.+?)@(.+?) just joined this channel!', clean_line):
                         username = re.match(r'(.+?)@(.+?) just joined this channel!', clean_line).group(1)
                         self.handle_user_greeting(username)
+                    elif re.match(r'(.+?)@(.+?) (is|are) here with you\.', clean_line):
+                        self.update_chat_members(clean_line)
                     # Check for trigger commands in public messages
                     elif "!weather" in clean_line:
                         location = clean_line.split("!weather", 1)[1].strip()
@@ -1154,6 +1174,9 @@ class BBSBotApp:
                         self.handle_map_command(place)
                     elif "!help" in clean_line:
                         self.handle_help_command()
+
+        # Update the previous line
+        self.previous_line = clean_line
 
     def handle_private_trigger(self, username, message):
         """
@@ -1443,7 +1466,7 @@ class BBSBotApp:
                 "textQuery": place
             }
             try:
-                r = requests.post(url, headers=headers, json=data, timeout=10)
+                r = requests.post(url, json=data, headers=headers, timeout=10)
                 r.raise_for_status()  # Raise an HTTPError for bad responses
                 data = r.json()
                 places = data.get("places", [])
@@ -1489,13 +1512,19 @@ class BBSBotApp:
         if self.keep_alive_task:
             self.keep_alive_task.cancel()
 
-    def handle_user_greeting(self, username):
+    def handle_user_greeting(self, entrance_message):
         """
         Handle user-specific greeting when they enter the chatroom.
         """
-        greeting_message = f"{username} just came into the chatroom, give them a casual greeting directed at them."
-        response = self.get_chatgpt_response(greeting_message, direct=True, username=username)
-        self.send_direct_message(username, response)
+        self.send_enter_keystroke()  # Send ENTER keystroke to get the list of users
+        time.sleep(1)  # Wait for the response to be processed
+        current_members = self.chat_members.copy()
+        new_member = entrance_message.split()[0]
+        new_member_username = new_member.split('@')[0]  # Remove the @<bbsaddress> part
+        if new_member_username not in current_members:
+            greeting_message = f"{new_member_username} just came into the chatroom, give them a casual greeting directed at them."
+            response = self.get_chatgpt_response(greeting_message, direct=True, username=new_member_username)
+            self.send_direct_message(new_member_username, response)
 
 def main():
     try:
@@ -1507,12 +1536,17 @@ def main():
         print("Script interrupted by user. Exiting...")
     finally:
         if app.connected:
-            app.disconnect_from_bbs()
+            asyncio.run_coroutine_threadsafe(app.disconnect_from_bbs(), app.loop).result()
         try:
             if root.winfo_exists():
                 root.quit()
         except tk.TclError:
             pass
+        finally:
+            try:
+                asyncio.get_event_loop().close()
+            except Exception as e:
+                print(f"Error closing event loop: {e}")
 
 if __name__ == "__main__":
     main()
