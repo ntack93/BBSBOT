@@ -74,6 +74,8 @@ class BBSBotApp:
         self.favorites = self.load_favorites()  # Load favorite BBS addresses
         self.favorites_window = None  # Track the Favorites window instance
 
+        self.chat_members = set()  # Set to keep track of chat members
+
         # Build UI
         self.build_ui()
 
@@ -339,7 +341,7 @@ class BBSBotApp:
     def toggle_connection(self):
         """Connect or disconnect from the BBS."""
         if self.connected:
-            self.disconnect_from_bbs()
+            asyncio.run(self.disconnect_from_bbs())
         else:
             self.start_connection()
 
@@ -356,7 +358,13 @@ class BBSBotApp:
 
         def run_telnet():
             asyncio.set_event_loop(self.loop)
-            self.loop.run_until_complete(self.telnet_client_task(host, port))
+            try:
+                self.loop.run_until_complete(self.telnet_client_task(host, port))
+            except Exception as e:
+                print(f"Exception in telnet client task: {e}")
+            finally:
+                self.loop.run_until_complete(self.loop.shutdown_asyncgens())
+                self.loop.close()
 
         thread = threading.Thread(target=run_telnet, daemon=True)
         thread.start()
@@ -392,10 +400,10 @@ class BBSBotApp:
             pass
         except Exception as e:
             self.msg_queue.put_nowait(f"Error reading from server: {e}\n")
+        finally:
+            await self.disconnect_from_bbs()
 
-        self.disconnect_from_bbs()
-
-    def disconnect_from_bbs(self):
+    async def disconnect_from_bbs(self):
         """Stop the background thread and close connections."""
         if not self.connected:
             return
@@ -404,6 +412,7 @@ class BBSBotApp:
         self.stop_keep_alive()  # Stop keep-alive coroutine
         if self.writer:
             self.writer.close()
+            await self.writer.drain()  # Ensure all data is sent before closing
 
         time.sleep(0.1)
         self.connected = False
@@ -417,6 +426,7 @@ class BBSBotApp:
             except tk.TclError:
                 pass
 
+        # Schedule the update_connect_button call from the main thread
         if threading.current_thread() is threading.main_thread():
             update_connect_button()
         else:
@@ -479,8 +489,20 @@ class BBSBotApp:
                     message = direct_message_match.group(2)
                     self.handle_direct_message(username, message)
                 else:
+                    # Check for user-specific triggers
+                    if re.match(r':\*\*\*\n->', clean_line):
+                        self.send_enter_keystroke()
+                        entrance_message_match = re.match(r':\*\*\*\n-> (.+)', clean_line)
+                        if entrance_message_match:
+                            entrance_message = entrance_message_match.group(1)
+                            self.handle_user_greeting(entrance_message)
+                    elif re.match(r'(.+?) just joined this channel!', clean_line):
+                        username = re.match(r'(.+?) just joined this channel!', clean_line).group(1)
+                        self.handle_user_greeting(username)
+                    elif re.match(r'(.+?)@(.+?) are here with you', clean_line) or re.match(r'(.+?)@(.+?) is here with you', clean_line):
+                        self.update_chat_members(clean_line)
                     # Check for trigger commands in public messages
-                    if "!weather" in clean_line:
+                    elif "!weather" in clean_line:
                         location = clean_line.split("!weather", 1)[1].strip()
                         self.handle_weather_command(location)
                     elif "!yt" in clean_line:
@@ -500,6 +522,17 @@ class BBSBotApp:
                         self.handle_map_command(place)
                     elif "!help" in clean_line:
                         self.handle_help_command()
+
+    def send_enter_keystroke(self):
+        """Send an <ENTER> keystroke to get the list of current chat members."""
+        if self.connected and self.writer:
+            asyncio.run_coroutine_threadsafe(self._send_message("\r\n"), self.loop)
+
+    def update_chat_members(self, line):
+        """Update the list of chat members based on the provided line."""
+        members = re.findall(r'(\w+@\w+\.\w+)', line)
+        self.chat_members = set(members)
+        print(f"Current chat members: {self.chat_members}")
 
     def handle_private_trigger(self, username, message):
         """
@@ -1097,8 +1130,23 @@ class BBSBotApp:
                     message = direct_message_match.group(2)
                     self.handle_direct_message(username, message)
                 else:
+                    # Check for user-specific triggers
+                    if re.match(r':\*\*\*\n->', clean_line):
+                        self.send_enter_keystroke()
+                        entrance_message_match = re.match(r':\*\*\*\n-> (.+)', clean_line)
+                        if entrance_message_match:
+                            entrance_message = entrance_message_match.group(1)
+                            self.handle_user_greeting(entrance_message)
+                    elif re.match(r'(.+?) just joined this channel!', clean_line):
+                        username = re.match(r'(.+?) just joined this channel!', clean_line).group(1)
+                        self.handle_user_greeting(username)
+                    elif re.match(r'(.+?)@(.+?) just joined this channel!', clean_line):
+                        username = re.match(r'(.+?)@(.+?) just joined this channel!', clean_line).group(1)
+                        self.handle_user_greeting(username)
+                    elif re.match(r'(.+?)@(.+?) are here with you', clean_line) or re.match(r'(.+?)@(.+?) is here with you', clean_line):
+                        self.update_chat_members(clean_line)
                     # Check for trigger commands in public messages
-                    if "!weather" in clean_line:
+                    elif "!weather" in clean_line:
                         location = clean_line.split("!weather", 1)[1].strip()
                         self.handle_weather_command(location)
                     elif "!yt" in clean_line:
@@ -1453,6 +1501,20 @@ class BBSBotApp:
         if self.keep_alive_task:
             self.keep_alive_task.cancel()
 
+    def handle_user_greeting(self, entrance_message):
+        """
+        Handle user-specific greeting when they enter the chatroom.
+        """
+        self.send_enter_keystroke()  # Send ENTER keystroke to get the list of users
+        time.sleep(1)  # Wait for the response to be processed
+        current_members = self.chat_members.copy()
+        new_member = entrance_message.split()[0]
+        new_member_username = new_member.split('@')[0]  # Remove the @<bbsaddress> part
+        if new_member_username not in current_members:
+            greeting_message = f"{new_member_username} just came into the chatroom, give them a casual greeting directed at them."
+            response = self.get_chatgpt_response(greeting_message, direct=True, username=new_member_username)
+            self.send_direct_message(new_member_username, response)
+
 def main():
     try:
         asyncio.set_event_loop(asyncio.new_event_loop())
@@ -1463,12 +1525,14 @@ def main():
         print("Script interrupted by user. Exiting...")
     finally:
         if app.connected:
-            app.disconnect_from_bbs()
+            asyncio.run(app.disconnect_from_bbs())
         try:
             if root.winfo_exists():
                 root.quit()
         except tk.TclError:
             pass
+        finally:
+            asyncio.get_event_loop().close()
 
 if __name__ == "__main__":
     main()

@@ -46,6 +46,9 @@ document.addEventListener('DOMContentLoaded', function() {
     // Load and set the state of the Google Places API key
     const googlePlacesApiKey = localStorage.getItem('googlePlacesApiKey') || '';
     document.getElementById('googlePlacesApiKey').value = googlePlacesApiKey;
+
+    // Add event listener for the "Split View" button
+    document.getElementById('splitViewButton').addEventListener('click', splitView);
 });
 
 document.getElementById('toggleModeButton').addEventListener('click', function() {
@@ -231,5 +234,40 @@ document.getElementById('saveSettingsButton').addEventListener('click', function
     const googlePlacesApiKey = document.getElementById('googlePlacesApiKey').value;
     localStorage.setItem('googlePlacesApiKey', googlePlacesApiKey);
 });
+
+// Function to create a new bot instance
+function createBotInstance(containerId) {
+    const container = document.getElementById(containerId);
+    const botFrame = document.createElement('iframe');
+    botFrame.src = 'ui.html'; // Assuming the bot UI is in ui.html
+    botFrame.style.width = '100%';
+    botFrame.style.height = '100%';
+    botFrame.style.border = 'none';
+    container.appendChild(botFrame);
+}
+
+// Function to split the view
+function splitView() {
+    const mainContainer = document.getElementById('mainContainer');
+    mainContainer.innerHTML = ''; // Clear existing content
+
+    const leftContainer = document.createElement('div');
+    leftContainer.id = 'leftContainer';
+    leftContainer.style.width = '50%';
+    leftContainer.style.height = '100%';
+    leftContainer.style.float = 'left';
+
+    const rightContainer = document.createElement('div');
+    rightContainer.id = 'rightContainer';
+    rightContainer.style.width = '50%';
+    rightContainer.style.height = '100%';
+    rightContainer.style.float = 'left';
+
+    mainContainer.appendChild(leftContainer);
+    mainContainer.appendChild(rightContainer);
+
+    createBotInstance('leftContainer');
+    createBotInstance('rightContainer');
+}
 
 // ...existing code...
