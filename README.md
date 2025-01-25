@@ -5,7 +5,7 @@ BBS Chat Bot is a Python application that functions as a BBS Teleconference Bot.
 ## Features
 
 - Connect to a BBS using a specified host and port.
-- Toggle between ANSI and plain text terminal emulation modes.
+- Toggle between ANSI and RIPscript terminal emulation modes. *In Development*
 - Manage favorite BBS addresses with the ability to add and remove favorites.
 - Save and load favorite addresses from local storage.
 - Use `!search <keyword>` for web searches.
@@ -16,6 +16,7 @@ BBS Chat Bot is a Python application that functions as a BBS Teleconference Bot.
 - Use `!map <place>` to fetch place information from Google Places API.
 - Use `/P <username> <message>` to send and receive pages with query responses.
 - **NEW**: Conversation persistence using DynamoDB.
+- **NEW**: Split view to create multiple bot instances. *still in development*
 
 ## Requirements
 
@@ -122,7 +123,7 @@ To enable conversation persistence using DynamoDB, follow these steps:
 
 2. Use the GUI to enter the BBS host and port, then click "Connect" to establish a connection.
 
-3. Toggle between ANSI and plain text modes using the "Toggle Mode" button.
+3. Toggle between ANSI and RIPscript modes using the "Toggle Mode" button. *still in dev*
 
 4. Manage your favorite BBS addresses using the "Favorites" button. Add new addresses or remove existing ones.
 
