@@ -44,6 +44,7 @@ class BBSBotApp:
         self.google_cse_cx = tk.StringVar(value=DEFAULT_GOOGLE_CSE_CX)
         self.news_api_key = tk.StringVar(value=DEFAULT_NEWS_API_KEY)
         self.google_places_api_key = tk.StringVar(value=DEFAULT_GOOGLE_PLACES_API_KEY)
+        self.pexels_api_key = tk.StringVar(value="")  # Add Pexels API Key
         self.nickname = tk.StringVar(value=self.load_nickname())
         self.username = tk.StringVar(value=self.load_username())
         self.password = tk.StringVar(value=self.load_password())
@@ -265,6 +266,11 @@ class BBSBotApp:
         # ----- Google Places API Key -----
         ttk.Label(settings_win, text="Google Places API Key:").grid(row=row_index, column=0, padx=5, pady=5, sticky=tk.E)
         ttk.Entry(settings_win, textvariable=self.google_places_api_key, width=40).grid(row=row_index, column=1, padx=5, pady=5)
+        row_index += 1
+
+        # ----- Pexels API Key -----
+        ttk.Label(settings_win, text="Pexels API Key:").grid(row=row_index, column=0, padx=5, pady=5, sticky=tk.E)
+        ttk.Entry(settings_win, textvariable=self.pexels_api_key, width=40).grid(row=row_index, column=1, padx=5, pady=5)
         row_index += 1
 
         # ----- Font Name -----
@@ -591,6 +597,9 @@ class BBSBotApp:
                     elif "!map" in clean_line:
                         place = clean_line.split("!map", 1)[1].strip()
                         self.handle_map_command(place)
+                    elif "!pic" in clean_line:
+                        query = clean_line.split("!pic", 1)[1].strip()
+                        self.handle_pic_command(query)
                     elif "!help" in clean_line:
                         self.handle_help_command()
 
@@ -624,6 +633,9 @@ class BBSBotApp:
         elif "!map" in message:
             place = message.split("!map", 1)[1].strip()
             response = self.get_map_response(place)
+        elif "!pic" in message:
+            query = message.split("!pic", 1)[1].strip()
+            response = self.get_pic_response(query)
         elif "!help" in message:
             response = self.get_help_response()
         else:
@@ -664,6 +676,9 @@ class BBSBotApp:
         elif "!map" in message:
             place = message.split("!map", 1)[1].strip()
             response = self.get_map_response(place)
+        elif "!pic" in message:
+            query = message.split("!pic", 1)[1].strip()
+            response = self.get_pic_response(query)
         elif "!help" in message:
             response = self.get_help_response()
         else:
@@ -685,7 +700,14 @@ class BBSBotApp:
         """
         Handle direct messages and interpret them as !chat queries.
         """
-        response = self.get_chatgpt_response(message, direct=True, username=username)
+        self.refresh_membership()  # Refresh membership before generating response
+
+        if "who's here" in message.lower() or "who is here" in message.lower():
+            query = "who else is in the chat room?"
+            response = self.get_chatgpt_response(query, direct=True, username=username)
+        else:
+            response = self.get_chatgpt_response(message, direct=True, username=username)
+        
         self.send_direct_message(username, response)
 
     def send_direct_message(self, username, message):
@@ -804,14 +826,14 @@ class BBSBotApp:
 
         openai.api_key = key
 
-        # Retrieve chat members from DynamoDB
-        chat_members = self.get_chat_members()
+        # Use the in-memory self.chat_members
+        members = list(self.chat_members)
 
         # Turn user@domain into just the username portion if you want:
         # e.g. Noah@bbs.uorealms.com -> "Noah", Wags@dwbbs.ddns.net -> "Wags"
         # Or you can keep them as full addresses. This is up to you.
         chatroom_usernames = []
-        for member in chat_members:
+        for member in members:
             # Split on '@' to grab the name
             name_part = member.split('@')[0]
             chatroom_usernames.append(name_part)
@@ -1269,6 +1291,9 @@ class BBSBotApp:
                     elif "!map" in clean_line:
                         place = clean_line.split("!map", 1)[1].strip()
                         self.handle_map_command(place)
+                    elif "!pic" in clean_line:
+                        query = clean_line.split("!pic", 1)[1].strip()
+                        self.handle_pic_command(query)
                     elif "!help" in clean_line:
                         self.handle_help_command()
 
@@ -1297,6 +1322,9 @@ class BBSBotApp:
         elif "!map" in message:
             place = message.split("!map", 1)[1].strip()
             response = self.get_map_response(place)
+        elif "!pic" in message:
+            query = message.split("!pic", 1)[1].strip()
+            response = self.get_pic_response(query)
         elif "!help" in message:
             response = self.get_help_response()
         else:
@@ -1337,6 +1365,9 @@ class BBSBotApp:
         elif "!map" in message:
             place = message.split("!map", 1)[1].strip()
             response = self.get_map_response(place)
+        elif "!pic" in message:
+            query = message.split("!pic", 1)[1].strip()
+            response = self.get_pic_response(query)
         elif "!help" in message:
             response = self.get_help_response()
         else:
@@ -1490,9 +1521,7 @@ class BBSBotApp:
         Send user_text to ChatGPT and handle responses.
         The response can be longer than 200 characters but will be split into blocks.
         """
-        self.send_enter_keystroke()  # Send ENTER keystroke to check chatroom members
-        time.sleep(1)  # Wait for the response to be processed
-        print(f"Debug: Chat members before sending to ChatGPT: {self.chat_members}")  # Debug statement
+        self.refresh_membership()  # Refresh membership before generating response
         response = self.get_chatgpt_response(user_text, username=username)
         self.send_full_message(response)
 
@@ -1585,6 +1614,46 @@ class BBSBotApp:
             greeting_message = f"{new_member_username} just came into the chatroom, give them a casual greeting directed at them."
             response = self.get_chatgpt_response(greeting_message, direct=True, username=new_member_username)
             self.send_direct_message(new_member_username, response)
+
+    def handle_pic_command(self, query):
+        """Fetch a random picture from Pexels based on the query."""
+        key = self.pexels_api_key.get()
+        if not key:
+            response = "Pexels API key is missing."
+        elif not query:
+            response = "Please specify a query."
+        else:
+            url = "https://api.pexels.com/v1/search"
+            headers = {
+                "Authorization": key
+            }
+            params = {
+                "query": query,
+                "per_page": 1,
+                "page": 1
+            }
+            try:
+                r = requests.get(url, headers=headers, params=params, timeout=10)
+                r.raise_for_status()  # Raise an HTTPError for bad responses
+                data = r.json()
+                photos = data.get("photos", [])
+                if not photos:
+                    response = f"No pictures found for '{query}'."
+                else:
+                    photo = photos[0]
+                    photographer = photo.get("photographer", "Unknown")
+                    src = photo.get("src", {}).get("original", "No URL")
+                    response = f"Photo by {photographer}: {src}"
+            except requests.exceptions.RequestException as e:
+                response = f"Error fetching picture: {str(e)}"
+
+        self.send_full_message(response)
+
+    def refresh_membership(self):
+        """Refresh the membership list by sending an ENTER keystroke and allowing time for processing."""
+        self.send_enter_keystroke()
+        time.sleep(1)         # Allow BBS lines to arrive
+        self.master.update()  # Let process_incoming_messages() parse them
 
 def main():
     try:
