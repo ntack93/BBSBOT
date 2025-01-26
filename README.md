@@ -14,6 +14,7 @@ BBS Chat Bot is a Python application that functions as a BBS Teleconference Bot.
 - Use `!yt <query>` for YouTube searches.
 - Use `!news <topic>` for news searches via newsapi.org.
 - Use `!map <place>` to fetch place information from Google Places API.
+- Use `!pic <query>` to fetch a random picture from Pexels.
 - Use `/P <username> <message>` to send and receive pages with query responses.
 - **NEW**: Conversation persistence using DynamoDB.
 - **NEW**: Split view to create multiple bot instances. *still in development*
@@ -95,6 +96,12 @@ To use the various `!triggers` in the bot, you need to set up API keys for diffe
 3. Generate an API key for the project.
 4. Copy the API key and enter it in the Settings window under "Google Places API Key".
 
+### Pexels API Key
+
+1. Sign up for an account at [Pexels](https://www.pexels.com/).
+2. Navigate to the API section and generate a new API key.
+3. Copy the API key and enter it in the Settings window under "Pexels API Key".
+
 ## DynamoDB Setup
 
 To enable conversation persistence using DynamoDB, follow these steps:
@@ -106,7 +113,11 @@ To enable conversation persistence using DynamoDB, follow these steps:
     - **Primary key**:
         - **Partition key**: `username` (Type: String)
         - **Sort key**: `timestamp` (Type: Number)
-4. Configure your AWS credentials:
+4. Create another table for chat members with the following settings:
+    - **Table name**: `ChatRoomMembers`
+    - **Primary key**:
+        - **Partition key**: `room` (Type: String)
+5. Configure your AWS credentials:
     - Install the AWS CLI: [AWS CLI Installation](https://docs.aws.amazon.com/cli/latest/userguide/install-cliv2.html)
     - Configure the AWS CLI with your credentials:
         ```sh
@@ -135,6 +146,7 @@ To enable conversation persistence using DynamoDB, follow these steps:
     - **Google CSE ID (cx)**: Required for the `!search` trigger to perform Google Custom Searches.
     - **News API Key**: Required for the `!news` trigger to fetch news headlines.
     - **Google Places API Key**: Required for the `!map` trigger to fetch place information.
+    - **Pexels API Key**: Required for the `!pic` trigger to fetch random pictures.
 
 6. To use the paging feature, send a page using the syntax `/P <username> <message>`. For example:
     ```sh

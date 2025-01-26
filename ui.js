@@ -125,6 +125,7 @@ function createContextMenu(event, inputElement) {
     cut.style.padding = '5px';
     cut.style.cursor = 'pointer';
     cut.addEventListener('click', () => {
+        inputElement.select();
         document.execCommand('cut');
         menu.remove();
     });
@@ -134,6 +135,7 @@ function createContextMenu(event, inputElement) {
     copy.style.padding = '5px';
     copy.style.cursor = 'pointer';
     copy.addEventListener('click', () => {
+        inputElement.select();
         document.execCommand('copy');
         menu.remove();
     });
@@ -143,6 +145,7 @@ function createContextMenu(event, inputElement) {
     paste.style.padding = '5px';
     paste.style.cursor = 'pointer';
     paste.addEventListener('click', () => {
+        inputElement.select();
         document.execCommand('paste');
         menu.remove();
     });
@@ -160,13 +163,13 @@ function createContextMenu(event, inputElement) {
 }
 
 // Add context menu event listeners to input fields
-document.querySelectorAll('input[type="text"]').forEach(input => {
+document.querySelectorAll('input[type="text"], input[type="password"]').forEach(input => {
     input.addEventListener('contextmenu', (event) => createContextMenu(event, input));
 });
 
 // Add context menu event listeners to input fields in the Settings window
 document.addEventListener('DOMContentLoaded', () => {
-    document.querySelectorAll('#settingsWindow input[type="text"]').forEach(input => {
+    document.querySelectorAll('#settingsWindow input[type="text"], #settingsWindow input[type="password"]').forEach(input => {
         input.addEventListener('contextmenu', (event) => createContextMenu(event, input));
     });
 });
@@ -183,8 +186,14 @@ document.getElementById('mudModeCheckbox').addEventListener('change', function()
     localStorage.setItem('mudMode', mudMode);
 });
 
+// Function to send an ENTER keystroke to check chatroom members
+function checkChatroomMembers() {
+    sendMessage('\r\n');
+}
+
 // Function to send a message with optional Mud Mode prefix
 function sendMessage(message) {
+    checkChatroomMembers(); // Check chatroom members before sending the message
     const mudMode = localStorage.getItem('mudMode') === 'true';
     const prefix = mudMode ? 'Gos ' : '';
     const fullMessage = prefix + message + '\r\n'; // Append carriage return and newline
@@ -269,5 +278,10 @@ function splitView() {
     createBotInstance('leftContainer');
     createBotInstance('rightContainer');
 }
+
+// Function to handle the Teleconference button click
+document.getElementById('teleconferenceButton').addEventListener('click', function() {
+    sendMessage('/go teleconference');
+});
 
 // ...existing code...

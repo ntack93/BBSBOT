@@ -91,6 +91,7 @@ class BBSBotApp:
         self.table_name = table_name
         self.create_dynamodb_table()
         self.previous_line = ""  # Store the previous line to detect multi-line triggers
+        self.user_list_buffer = []  # Buffer to accumulate user list lines
 
     def create_dynamodb_table(self):
         """Create DynamoDB table if it doesn't exist."""
@@ -389,7 +390,7 @@ class BBSBotApp:
             while not self.stop_event.is_set():
                 data = await reader.read(4096)
                 if not data:
-                    break
+                    break;
                 self.msg_queue.put_nowait(data)
         except asyncio.CancelledError:
             pass
@@ -407,11 +408,13 @@ class BBSBotApp:
         self.stop_keep_alive()  # Stop keep-alive coroutine
         if self.writer:
             try:
-                if not self.writer.is_closing():
+                if hasattr(self.writer, 'is_closing') and not self.writer.is_closing():
                     self.writer.close()
                     await self.writer.drain()  # Ensure all data is sent before closing
             except Exception as e:
                 print(f"Error closing writer: {e}")
+        else:
+            print("Writer is already None")
 
         time.sleep(0.1)
         self.connected = False
@@ -450,13 +453,82 @@ class BBSBotApp:
         """
         self.partial_line += data
         lines = self.partial_line.split("\n")
+
         for line in lines[:-1]:
-            # Display each complete line
             self.append_terminal_text(line + "\n", "normal")
-            self.parse_incoming_triggers(line)  # Ensure triggers are parsed
+            self.parse_incoming_triggers(line)
+
+            # If line contains '@', we assume it might be part of the user list
+            if "@" in line:
+                self.user_list_buffer.append(line)
+
+            # If line ends with "are here with you." or "is here with you.", parse entire buffer
+            if re.search(r'(is|are) here with you\.$', line.strip()):
+                # Include this line in the buffer if not already included
+                if line not in self.user_list_buffer:
+                    self.user_list_buffer.append(line)
+                self.update_chat_members(self.user_list_buffer)
+                self.user_list_buffer = []
+
+            # Check for user joining message
+            if line.strip() == ":***":
+                self.previous_line = ":***"
+            elif self.previous_line == ":***" and re.match(r'(.+?) just joined this channel!', line.strip()):
+                username = re.match(r'(.+?) just joined this channel!', line.strip()).group(1)
+                self.handle_user_greeting(username)
+                self.previous_line = ""
 
         # The last piece may be partial if no trailing newline
         self.partial_line = lines[-1]
+
+    def update_chat_members(self, lines_with_users):
+        """
+        lines_with_users: list of lines that contain '@', culminating in 'are here with you.'
+        We'll combine them all, remove ANSI codes, then parse out the user@host addresses and usernames.
+        """
+        combined = " ".join(lines_with_users)  # join with space
+        print(f"[DEBUG] Combined user lines: {combined}")  # Debug statement
+
+        # Remove ANSI codes
+        ansi_escape_regex = re.compile(r'\x1b\[(.*?)m')
+        combined_clean = ansi_escape_regex.sub('', combined)
+        print(f"[DEBUG] Cleaned combined user lines: {combined_clean}")  # Debug statement
+
+        # Refine regex to capture usernames and addresses
+        addresses = re.findall(r'(\b\S+@\S+\.\S+\b)', combined_clean)
+        print(f"[DEBUG] Regex match result: {addresses}")  # Debug statement
+
+        # Make them a set to avoid duplicates
+        self.chat_members = set(addresses)
+        self.save_chat_members()  # Save updated chat members to DynamoDB
+
+        print(f"[DEBUG] Updated chat members: {self.chat_members}")
+
+    def save_chat_members(self):
+        """Save chat members to DynamoDB."""
+        chat_members_table = dynamodb.Table('ChatRoomMembers')
+        try:
+            chat_members_table.put_item(
+                Item={
+                    'room': 'default',
+                    'members': list(self.chat_members)
+                }
+            )
+            print(f"[DEBUG] Saved chat members to DynamoDB: {self.chat_members}")
+        except Exception as e:
+            print(f"Error saving chat members to DynamoDB: {e}")
+
+    def get_chat_members(self):
+        """Retrieve chat members from DynamoDB."""
+        chat_members_table = dynamodb.Table('ChatRoomMembers')
+        try:
+            response = chat_members_table.get_item(Key={'room': 'default'})
+            members = response.get('Item', {}).get('members', [])
+            print(f"[DEBUG] Retrieved chat members from DynamoDB: {members}")
+            return members
+        except Exception as e:
+            print(f"Error retrieving chat members from DynamoDB: {e}")
+            return []
 
     def parse_incoming_triggers(self, line):
         """
@@ -498,7 +570,7 @@ class BBSBotApp:
                     elif re.match(r'(.+?)@(.+?) just joined this channel!', clean_line):
                         username = re.match(r'(.+?)@(.+?) just joined this channel!', clean_line).group(1)
                         self.handle_user_greeting(username)
-                    elif re.match(r'(.+?)@(.+?) (is|are) here with you\.', clean_line):
+                    elif re.match(r'Topic: \(.*?\)\.\s*(.*?)\s*are here with you\.', clean_line, re.DOTALL):
                         self.update_chat_members(clean_line)
                     # Check for trigger commands in public messages
                     elif "!weather" in clean_line:
@@ -529,12 +601,6 @@ class BBSBotApp:
         """Send an <ENTER> keystroke to get the list of current chat members."""
         if self.connected and self.writer:
             asyncio.run_coroutine_threadsafe(self._send_message("\r\n"), self.loop)
-
-    def update_chat_members(self, line):
-        """Update the list of chat members based on the provided line."""
-        members = re.findall(r'(\w+@\w+\.\w+)', line)
-        self.chat_members = set(members)
-        print(f"Current chat members: {self.chat_members}")
 
     def handle_private_trigger(self, username, message):
         """
@@ -738,8 +804,21 @@ class BBSBotApp:
 
         openai.api_key = key
 
-        # Prepare the list of current chatroom members
-        chatroom_members = ', '.join([member.split('@')[0] for member in self.chat_members])
+        # Retrieve chat members from DynamoDB
+        chat_members = self.get_chat_members()
+
+        # Turn user@domain into just the username portion if you want:
+        # e.g. Noah@bbs.uorealms.com -> "Noah", Wags@dwbbs.ddns.net -> "Wags"
+        # Or you can keep them as full addresses. This is up to you.
+        chatroom_usernames = []
+        for member in chat_members:
+            # Split on '@' to grab the name
+            name_part = member.split('@')[0]
+            chatroom_usernames.append(name_part)
+
+        # Create a simple comma-separated string for the system prompt
+        chatroom_members_str = ", ".join(chatroom_usernames)
+        print(f"[DEBUG] Chatroom members string for ChatGPT: {chatroom_members_str}")
 
         system_message = (
             "Your name is Jeremy. You speak very casually. When you greet people, you usually say things like 'Hey :)', 'What's up?', 'How's it going?', or just wave (wave <user>). "
@@ -748,7 +827,7 @@ class BBSBotApp:
             "If a user says '#tedmodeon', you are to respond as Ted from the Bill and Ted movies, while still having the knowledge and ability of a powerful A.I. "
             "#tedmodeoff toggles you back to a friendly A.I. assistant who's sitting in a chatroom. Maintain your toggle state relative to each user. "
             "Respond concisely, longer responses should split into 250-character blocks for display, but don't exceed 500 total characters in your responses. "
-            f"The current chatroom members are: {chatroom_members}."
+            f"The current chatroom members are: {chatroom_members_str}."
         )
 
         if direct:
@@ -759,30 +838,33 @@ class BBSBotApp:
                 "If a user says '#tedmodeon', you are to respond as Ted from the Bill and Ted movies, while still having the knowledge and ability of a powerful A.I. "
                 "#tedmodeoff toggles you back to a friendly A.I. assistant who's sitting in a chatroom. Maintain your toggle state relative to each user. "
                 "Respond concisely, and ensure your response is 230 characters or fewer. "
-                f"The current chatroom members are: {chatroom_members}."
+                f"The current chatroom members are: {chatroom_members_str}."
             )
 
+        # Optionally load conversation history from DynamoDB
         conversation_history = self.get_conversation_history(username) if username else []
 
         messages = [
             {"role": "system", "content": system_message}
-        ] + [
-            {"role": "user", "content": item['message']} for item in conversation_history
-        ] + [
-            {"role": "assistant", "content": item['response']} for item in conversation_history
-        ] + [
-            {"role": "user", "content": user_text}
         ]
+        # Then append user messages and assistant replies from the DB ...
+        for item in conversation_history:
+            messages.append({"role": "user", "content": item['message']})
+            messages.append({"role": "assistant", "content": item['response']})
+
+        # Finally append this new user_text
+        messages.append({"role": "user", "content": user_text})
 
         try:
             completion = openai.ChatCompletion.create(
                 model="gpt-4o-mini",
                 n=1,
-                max_tokens=500 if not direct else 230,  # Adjust max tokens for direct messages
-                temperature=0.5,  # Set temperature to 2
+                max_tokens=500 if not direct else 230,
+                temperature=0.5,
                 messages=messages
             )
             gpt_response = completion.choices[0].message["content"]
+
             if username:
                 self.save_conversation(username, user_text, gpt_response)
 
@@ -790,6 +872,16 @@ class BBSBotApp:
             gpt_response = f"Error with ChatGPT API: {str(e)}"
 
         return gpt_response
+
+    def escape_special_characters(self, text):
+        """Escape special characters in the text."""
+        return (
+            text.replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+                .replace('"', "&quot;")
+                .replace("'", "&#39;")
+        )
 
     def get_news_response(self, topic):
         """Fetch top 2 news headlines and return the response as a string."""
@@ -1156,7 +1248,7 @@ class BBSBotApp:
                     elif re.match(r'(.+?)@(.+?) just joined this channel!', clean_line):
                         username = re.match(r'(.+?)@(.+?) just joined this channel!', clean_line).group(1)
                         self.handle_user_greeting(username)
-                    elif re.match(r'(.+?)@(.+?) (is|are) here with you\.', clean_line):
+                    elif re.match(r'Topic: \(.*?\)\.\s*(.*?)\s*are here with you\.', clean_line, re.DOTALL):
                         self.update_chat_members(clean_line)
                     # Check for trigger commands in public messages
                     elif "!weather" in clean_line:
@@ -1398,47 +1490,11 @@ class BBSBotApp:
         Send user_text to ChatGPT and handle responses.
         The response can be longer than 200 characters but will be split into blocks.
         """
-        key = self.openai_api_key.get()
-        if not key:
-            gpt_response = "OpenAI API key is missing."
-            self.send_full_message(gpt_response)
-            return
-
-        openai.api_key = key
-
-        system_message = (
-            "If a user says #flirtmodeon, you are to engage a mode to respond to querys with a very raunchy, flirty tone, when the user says #flirtmodeoff it disables. If a user says '#tedmodeon' You are to respond as Ted from the Bill and Ted movies, while still having the knowledge and ability of a powerful A.I.. #tedmodeoff Toggles you back to a friendly a.i. assistant who's sitting in a chatroom.Maintain your toggle state relative to each user. Respond concisely, longer responses should split into "
-            "200-character blocks for display, but don't exceed 500 total characters in your responses."
-        )
-
-        conversation_history = self.get_conversation_history(username) if username else []
-
-        messages = [
-            {"role": "system", "content": system_message}
-        ] + [
-            {"role": "user", "content": item['message']} for item in conversation_history
-        ] + [
-            {"role": "assistant", "content": item['response']} for item in conversation_history
-        ] + [
-            {"role": "user", "content": user_text}
-        ]
-
-        try:
-            completion = openai.ChatCompletion.create(
-                model="gpt-4o-mini",
-                n=1,
-                max_tokens=500,  # Allow for longer responses
-                messages=messages
-            )
-            gpt_response = completion.choices[0].message["content"]
-            if username:
-                self.save_conversation(username, user_text, gpt_response)
-
-        except Exception as e:
-            gpt_response = f"Error with ChatGPT API: {str(e)}"
-
-        # Send the full response to be chunked and transmitted
-        self.send_full_message(gpt_response)
+        self.send_enter_keystroke()  # Send ENTER keystroke to check chatroom members
+        time.sleep(1)  # Wait for the response to be processed
+        print(f"Debug: Chat members before sending to ChatGPT: {self.chat_members}")  # Debug statement
+        response = self.get_chatgpt_response(user_text, username=username)
+        self.send_full_message(response)
 
     ########################################################################
     #                           News
@@ -1517,15 +1573,14 @@ class BBSBotApp:
         if self.keep_alive_task:
             self.keep_alive_task.cancel()
 
-    def handle_user_greeting(self, entrance_message):
+    def handle_user_greeting(self, username):
         """
         Handle user-specific greeting when they enter the chatroom.
         """
         self.send_enter_keystroke()  # Send ENTER keystroke to get the list of users
         time.sleep(1)  # Wait for the response to be processed
         current_members = self.chat_members.copy()
-        new_member = entrance_message.split()[0]
-        new_member_username = new_member.split('@')[0]  # Remove the @<bbsaddress> part
+        new_member_username = username.split('@')[0]  # Remove the @<bbsaddress> part
         if new_member_username not in current_members:
             greeting_message = f"{new_member_username} just came into the chatroom, give them a casual greeting directed at them."
             response = self.get_chatgpt_response(greeting_message, direct=True, username=new_member_username)
@@ -1539,6 +1594,8 @@ def main():
         root.mainloop()
     except KeyboardInterrupt:
         print("Script interrupted by user. Exiting...")
+    except Exception as e:
+        print(f"An error occurred: {e}")
     finally:
         if app.connected:
             asyncio.run_coroutine_threadsafe(app.disconnect_from_bbs(), app.loop).result()
