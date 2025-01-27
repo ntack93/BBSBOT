@@ -1702,6 +1702,37 @@ class BBSBotApp:
         time.sleep(1)         # Allow BBS lines to arrive
         self.master.update()  # Let process_incoming_messages() parse them
 
+    def get_news_response(self, topic):
+        """Fetch top 2 news headlines and return the response as a string."""
+        key = self.news_api_key.get()
+        if not key:
+            return "News API key is missing."
+        else:
+            url = "https://newsapi.org/v2/everything"  # Using "everything" endpoint for broader topic search
+            params = {
+                "q": topic,  # The keyword/topic to search for
+                "apiKey": key,
+                "language": "en",
+                "pageSize": 2  # Fetch top 2 headlines
+            }
+            try:
+                r = requests.get(url, params=params)
+                data = r.json()
+                articles = data.get("articles", [])
+                if not articles:
+                    return f"No news articles found for '{topic}'."
+                else:
+                    response = ""
+                    for i, article in enumerate(articles):
+                        title = article.get("title", "No Title")
+                        description = article.get("description", "No Description")
+                        link = article.get("url", "No URL")
+                        response += f"{i + 1}. {title}\n   {description[:230]}...\n"
+                        response += f"Link: {link}\n\n"
+                    return response.strip()
+            except Exception as e:
+                return f"Error fetching news: {str(e)}"
+
 def main():
     try:
         asyncio.set_event_loop(asyncio.new_event_loop())
