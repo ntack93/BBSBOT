@@ -446,6 +446,7 @@ class BBSBotApp:
         try:
             while True:
                 data = self.msg_queue.get_nowait()
+                print(f"Incoming message: {data}")  # Log incoming messages
                 self.process_data_chunk(data)
         except queue.Empty:
             pass
@@ -453,6 +454,7 @@ class BBSBotApp:
             self.master.after(100, self.process_incoming_messages)
 
     def process_data_chunk(self, data):
+        print(f"Data chunk received: {data}")  # Log data chunks
         """
         Accumulate data in self.partial_line.
         Split on newline, parse triggers for complete lines.
@@ -462,6 +464,7 @@ class BBSBotApp:
 
         for line in lines[:-1]:
             self.append_terminal_text(line + "\n", "normal")
+            print(f"Incoming line: {line}")  # Log each incoming line
             self.parse_incoming_triggers(line)
 
             # If line contains '@', we assume it might be part of the user list
@@ -501,7 +504,7 @@ class BBSBotApp:
         print(f"[DEBUG] Cleaned combined user lines: {combined_clean}")  # Debug statement
 
         # Refine regex to capture usernames and addresses
-        addresses = re.findall(r'(\b\S+@\S+\.\S+\b)', combined_clean)
+        addresses = re.findall(r'(\b\S+@\S+\.\S+\b|\b\S+\b)', combined_clean)
         print(f"[DEBUG] Regex match result: {addresses}")  # Debug statement
 
         # Make them a set to avoid duplicates
@@ -538,7 +541,8 @@ class BBSBotApp:
 
     def parse_incoming_triggers(self, line):
         """
-        Check for commands in the given line: !weather, !yt, !search, !chat, !news, !map, !help
+        Check for commands in the given line: !weather, !yt, !search, !chat, !news, !map, !pic, !polly, !help
+        And now also capture public messages for conversation history.
         """
         # Remove ANSI codes for easier parsing
         ansi_escape_regex = re.compile(r'\x1b\[(.*?)m')
@@ -550,58 +554,76 @@ class BBSBotApp:
             username = private_message_match.group(1)
             message = private_message_match.group(2)
             self.handle_private_trigger(username, message)
-        else:
-            # Check for page commands
-            page_message_match = re.match(r'(.+?) is paging you from (.+?): (.+)', clean_line)
-            if page_message_match:
-                username = page_message_match.group(1)
-                module_or_channel = page_message_match.group(2)
-                message = page_message_match.group(3)
-                self.handle_page_trigger(username, module_or_channel, message)
-            else:
-                # Check for direct messages
-                direct_message_match = re.match(r'From (.+?) \(to you\): (.+)', clean_line)
-                if direct_message_match:
-                    username = direct_message_match.group(1)
-                    message = direct_message_match.group(2)
-                    self.handle_direct_message(username, message)
-                else:
-                    # Check for user-specific triggers
-                    if self.previous_line == ":***" and clean_line.startswith("->"):
-                        entrance_message = clean_line[3:].strip()
-                        self.handle_user_greeting(entrance_message)
-                    elif re.match(r'(.+?) just joined this channel!', clean_line):
-                        username = re.match(r'(.+?) just joined this channel!', clean_line).group(1)
-                        self.handle_user_greeting(username)
-                    elif re.match(r'(.+?)@(.+?) just joined this channel!', clean_line):
-                        username = re.match(r'(.+?)@(.+?) just joined this channel!', clean_line).group(1)
-                        self.handle_user_greeting(username)
-                    elif re.match(r'Topic: \(.*?\)\.\s*(.*?)\s*are here with you\.', clean_line, re.DOTALL):
-                        self.update_chat_members(clean_line)
-                    # Check for trigger commands in public messages
-                    elif "!weather" in clean_line:
-                        location = clean_line.split("!weather", 1)[1].strip()
-                        self.handle_weather_command(location)
-                    elif "!yt" in clean_line:
-                        query = clean_line.split("!yt", 1)[1].strip()
-                        self.handle_youtube_command(query)
-                    elif "!search" in clean_line:
-                        query = clean_line.split("!search", 1)[1].strip()
-                        self.handle_web_search_command(query)
-                    elif "!chat" in clean_line:
-                        query = clean_line.split("!chat", 1)[1].strip()
-                        self.handle_chatgpt_command(query, username=None)
-                    elif "!news" in clean_line:
-                        topic = clean_line.split("!news", 1)[1].strip()
-                        self.handle_news_command(topic)
-                    elif "!map" in clean_line:
-                        place = clean_line.split("!map", 1)[1].strip()
-                        self.handle_map_command(place)
-                    elif "!pic" in clean_line:
-                        query = clean_line.split("!pic", 1)[1].strip()
-                        self.handle_pic_command(query)
-                    elif "!help" in clean_line:
-                        self.handle_help_command()
+            return
+
+        # Check for page commands
+        page_message_match = re.match(r'(.+?) is paging you from (.+?): (.+)', clean_line)
+        if page_message_match:
+            username = page_message_match.group(1)
+            module_or_channel = page_message_match.group(2)
+            message = page_message_match.group(3)
+            self.handle_page_trigger(username, module_or_channel, message)
+            return
+
+        # Check for direct messages
+        direct_message_match = re.match(r'From (.+?) \(to you\): (.+)', clean_line)
+        if direct_message_match:
+            username = direct_message_match.group(1)
+            message = direct_message_match.group(2)
+            self.handle_direct_message(username, message)
+            return
+
+        # Check for public messages
+        public_message_match = re.match(r'From (.+?): (.+)', clean_line)
+        if public_message_match:
+            username = public_message_match.group(1).strip()
+            message = public_message_match.group(2).strip()
+
+            # If the message includes "!chat", let's process it like any other chat trigger
+            if "!chat" in message:
+                query = message.split("!chat", 1)[1].strip()
+                self.handle_chatgpt_command(query, username=username)
+                return
+
+        # Check for user-specific triggers
+        if self.previous_line == ":***" and clean_line.startswith("->"):
+            entrance_message = clean_line[3:].strip()
+            self.handle_user_greeting(entrance_message)
+        elif re.match(r'(.+?) just joined this channel!', clean_line):
+            username = re.match(r'(.+?) just joined this channel!', clean_line).group(1)
+            self.handle_user_greeting(username)
+        elif re.match(r'(.+?)@(.+?) just joined this channel!', clean_line):
+            username = re.match(r'(.+?)@(.+?) just joined this channel!', clean_line).group(1)
+            self.handle_user_greeting(username)
+        elif re.match(r'Topic: \(.*?\)\.\s*(.*?)\s*are here with you\.', clean_line, re.DOTALL):
+            self.update_chat_members(clean_line)
+        # Check for trigger commands in public messages
+        elif "!weather" in clean_line:
+            location = clean_line.split("!weather", 1)[1].strip()
+            self.handle_weather_command(location)
+        elif "!yt" in clean_line:
+            query = clean_line.split("!yt", 1)[1].strip()
+            self.handle_youtube_command(query)
+        elif "!search" in clean_line:
+            query = clean_line.split("!search", 1)[1].strip()
+            # Extract the username from the line
+            username_match = re.match(r'From (.+?):', clean_line)
+            username = username_match.group(1) if username_match else "public_chat"
+            self.handle_chatgpt_command(query, username=username)
+        elif "!news" in clean_line:
+            topic = clean_line.split("!news", 1)[1].strip()
+            self.handle_news_command(topic)
+        elif "!map" in clean_line:
+            place = clean_line.split("!map", 1)[1].strip()
+            self.handle_map_command(place)
+        elif "!pic" in clean_line:
+            query = clean_line.split("!pic", 1)[1].strip()
+            self.handle_pic_command(query)
+        elif "!polly" in clean_line:
+            text = clean_line.split("!polly", 1)[1].strip()
+            self.handle_polly_command(text)
+        elif "!help" in clean_line:
+            self.handle_help_command()
 
         # Update the previous line
         self.previous_line = clean_line
@@ -701,6 +723,12 @@ class BBSBotApp:
         Handle direct messages and interpret them as !chat queries.
         """
         self.refresh_membership()  # Refresh membership before generating response
+        time.sleep(1)  # Allow time for membership list to be updated
+        self.master.update()  # Process any pending updates
+
+        # Fetch the latest chat members from DynamoDB
+        self.chat_members = set(self.get_chat_members())
+        print(f"[DEBUG] Updated chat members list before generating response: {self.chat_members}")
 
         if "who's here" in message.lower() or "who is here" in message.lower():
             query = "who else is in the chat room?"
@@ -826,8 +854,10 @@ class BBSBotApp:
 
         openai.api_key = key
 
-        # Use the in-memory self.chat_members
+        # Fetch the latest chat members from DynamoDB
+        self.chat_members = set(self.get_chat_members())
         members = list(self.chat_members)
+        print(f"[DEBUG] Members list used for ChatGPT response: {members}")
 
         # Turn user@domain into just the username portion if you want:
         # e.g. Noah@bbs.uorealms.com -> "Noah", Wags@dwbbs.ddns.net -> "Wags"
@@ -849,6 +879,7 @@ class BBSBotApp:
             "If a user says '#tedmodeon', you are to respond as Ted from the Bill and Ted movies, while still having the knowledge and ability of a powerful A.I. "
             "#tedmodeoff toggles you back to a friendly A.I. assistant who's sitting in a chatroom. Maintain your toggle state relative to each user. "
             "Respond concisely, longer responses should split into 250-character blocks for display, but don't exceed 500 total characters in your responses. "
+            "If asked about who's in the room, reference the current chatroom members list. "
             f"The current chatroom members are: {chatroom_members_str}."
         )
 
@@ -860,11 +891,15 @@ class BBSBotApp:
                 "If a user says '#tedmodeon', you are to respond as Ted from the Bill and Ted movies, while still having the knowledge and ability of a powerful A.I. "
                 "#tedmodeoff toggles you back to a friendly A.I. assistant who's sitting in a chatroom. Maintain your toggle state relative to each user. "
                 "Respond concisely, and ensure your response is 230 characters or fewer. "
+                "If asked about who's in the room, reference the current chatroom members list. "
                 f"The current chatroom members are: {chatroom_members_str}."
             )
 
         # Optionally load conversation history from DynamoDB
-        conversation_history = self.get_conversation_history(username) if username else []
+        if username:
+            conversation_history = self.get_conversation_history(username)
+        else:
+            conversation_history = self.get_conversation_history("public_chat")
 
         messages = [
             {"role": "system", "content": system_message}
@@ -876,6 +911,8 @@ class BBSBotApp:
 
         # Finally append this new user_text
         messages.append({"role": "user", "content": user_text})
+
+        print(f"[DEBUG] Chunks sent to ChatGPT: {messages}")  # Log chunks sent to ChatGPT
 
         try:
             completion = openai.ChatCompletion.create(
@@ -889,52 +926,35 @@ class BBSBotApp:
 
             if username:
                 self.save_conversation(username, user_text, gpt_response)
+            else:
+                self.save_conversation("public_chat", user_text, gpt_response)
 
         except Exception as e:
             gpt_response = f"Error with ChatGPT API: {str(e)}"
 
+        print(f"[DEBUG] ChatGPT response: {gpt_response}")  # Log ChatGPT response
         return gpt_response
 
-    def escape_special_characters(self, text):
-        """Escape special characters in the text."""
-        return (
-            text.replace("&", "&amp;")
-                .replace("<", "&lt;")
-                .replace(">", "&gt;")
-                .replace('"', "&quot;")
-                .replace("'", "&#39;")
-        )
+    def handle_chatgpt_command(self, user_text, username=None):
+        """
+        Send user_text to ChatGPT and handle responses.
+        The response can be longer than 200 characters but will be split into blocks.
+        """
+        self.refresh_membership()  # Refresh membership before generating response
+        time.sleep(1)  # Allow time for membership list to be updated
+        self.master.update()  # Process any pending updates
 
-    def get_news_response(self, topic):
-        """Fetch top 2 news headlines and return the response as a string."""
-        key = self.news_api_key.get()
-        if not key:
-            return "News API key is missing."
-        else:
-            url = "https://newsapi.org/v2/everything"  # Using "everything" endpoint for broader topic search
-            params = {
-                "q": topic,  # The keyword/topic to search for
-                "apiKey": key,
-                "language": "en",
-                "pageSize": 2  # Fetch top 2 headlines
-            }
-            try:
-                r = requests.get(url, params=params)
-                data = r.json()
-                articles = data.get("articles", [])
-                if not articles:
-                    return f"No news articles found for '{topic}'."
-                else:
-                    response = ""
-                    for i, article in enumerate(articles):
-                        title = article.get("title", "No Title")
-                        description = article.get("description", "No Description")
-                        link = article.get("url", "No URL")
-                        response += f"{i + 1}. {title}\n   {description[:230]}...\n"
-                        response += f"Link: {link}\n\n"
-                    return response.strip()
-            except Exception as e:
-                return f"Error fetching news: {str(e)}"
+        # Fetch the latest chat members from DynamoDB
+        self.chat_members = set(self.get_chat_members())
+        print(f"[DEBUG] Updated chat members list before generating response: {self.chat_members}")
+
+        response = self.get_chatgpt_response(user_text, username=username)
+        self.send_full_message(response)
+
+        # Save the conversation for non-directed messages
+        if username is None:
+            username = "public_chat"
+        self.save_conversation(username, user_text, response)
 
     def handle_news_command(self, topic):
         """Fetch top 2 news headlines based on the given topic."""
@@ -986,7 +1006,7 @@ class BBSBotApp:
         """Return the help message as a string."""
         return (
             "Available commands: Please use a ! immediately followed by one of the following keywords (no space): "
-            "weather <location>, yt <query>, search <query>, chat <message>, news <topic>, map <place>."
+            "weather <location>, yt <query>, search <query>, chat <message>, news <topic>, map <place>, pic <query>."
         )
 
     def append_terminal_text(self, text, default_tag="normal"):
@@ -1068,7 +1088,9 @@ class BBSBotApp:
         await self.writer.drain()
 
     def send_full_message(self, message):
-        """Send a full message to the terminal display and the BBS server."""
+        """
+        Send a full message to the terminal display and the BBS server.
+        """
         prefix = "Gos " if self.mud_mode.get() else ""
         lines = message.split('\n')
         full_message = prefix + '\n'.join(lines)
@@ -1077,10 +1099,13 @@ class BBSBotApp:
             self.append_terminal_text(chunk + "\n", "normal")
             if self.connected and self.writer:
                 asyncio.run_coroutine_threadsafe(self._send_message(chunk + "\r\n"), self.loop)
-                print(f"Sent to BBS: {chunk}")
+                time.sleep(0.1)  # Add a short delay to ensure messages are sent in sequence
+                print(f"Sent to BBS: {chunk}")  # Log chunks sent to BBS
 
     def chunk_message(self, message, chunk_size):
-        """Chunk a message into specified size, ensuring no content is lost."""
+        """
+        Chunk a message into specified size, ensuring no content is lost.
+        """
         words = message.split()
         chunks = []
         current_chunk = []
@@ -1284,7 +1309,10 @@ class BBSBotApp:
                         self.handle_web_search_command(query)
                     elif "!chat" in clean_line:
                         query = clean_line.split("!chat", 1)[1].strip()
-                        self.handle_chatgpt_command(query, username=None)
+                        # Extract the username from the line
+                        username_match = re.match(r'From (.+?):', clean_line)
+                        username = username_match.group(1) if username_match else "public_chat"
+                        self.handle_chatgpt_command(query, username=username)
                     elif "!news" in clean_line:
                         topic = clean_line.split("!news", 1)[1].strip()
                         self.handle_news_command(topic)
@@ -1294,6 +1322,9 @@ class BBSBotApp:
                     elif "!pic" in clean_line:
                         query = clean_line.split("!pic", 1)[1].strip()
                         self.handle_pic_command(query)
+                    elif "!polly" in clean_line:
+                        text = clean_line.split("!polly", 1)[1].strip()
+                        self.handle_polly_command(text)
                     elif "!help" in clean_line:
                         self.handle_help_command()
 
@@ -1392,7 +1423,7 @@ class BBSBotApp:
         """Provide a list of available commands, adhering to character and chunk limits."""
         help_message = (
             "Available commands: Please use a ! immediately followed by one of the following keywords (no space): "
-            "weather <location>, yt <query>, search <query>, chat <message>, news <topic>, map <place>."
+            "weather <location>, yt <query>, search <query>, chat <message>, news <topic>, map <place>, pic <query>."
         )
 
         # Send the help message as a single chunk if possible
@@ -1522,8 +1553,20 @@ class BBSBotApp:
         The response can be longer than 200 characters but will be split into blocks.
         """
         self.refresh_membership()  # Refresh membership before generating response
+        time.sleep(1)  # Allow time for membership list to be updated
+        self.master.update()  # Process any pending updates
+
+        # Fetch the latest chat members from DynamoDB
+        self.chat_members = set(self.get_chat_members())
+        print(f"[DEBUG] Updated chat members list before generating response: {self.chat_members}")
+
         response = self.get_chatgpt_response(user_text, username=username)
         self.send_full_message(response)
+
+        # Save the conversation for non-directed messages
+        if username is None:
+            username = "public_chat"
+        self.save_conversation(username, user_text, response)
 
     ########################################################################
     #                           News

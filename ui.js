@@ -1,5 +1,19 @@
 // ...existing code...
 
+function processIncomingMessages(data) {
+    console.log('Incoming message:', data); // Log incoming messages
+    // ...existing code...
+}
+
+// ...existing code...
+
+function processDataChunk(data) {
+    console.log('Data chunk received:', data); // Log data chunks
+    // ...existing code...
+}
+
+// ...existing code...
+
 // Function to load favorites from local storage
 function loadFavorites() {
     const storedFavorites = localStorage.getItem('favorites');
