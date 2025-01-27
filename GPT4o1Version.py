@@ -119,21 +119,43 @@ class BBSBotApp:
     def save_conversation(self, username, message, response):
         """Save conversation to DynamoDB."""
         timestamp = int(time.time())
-        table.put_item(
-            Item={
-                'username': username,
-                'timestamp': timestamp,
-                'message': message,
-                'response': response
-            }
-        )
+        # Ensure the response is split into chunks of 250 characters
+        response_chunks = self.chunk_message(response, 250)
+        for chunk in response_chunks:
+            table.put_item(
+                Item={
+                    'username': username,
+                    'timestamp': timestamp,
+                    'message': message,
+                    'response': chunk
+                }
+            )
+            # Update the timestamp for each chunk to maintain order
+            timestamp += 1
 
     def get_conversation_history(self, username):
         """Retrieve conversation history from DynamoDB."""
         response = table.query(
             KeyConditionExpression=boto3.dynamodb.conditions.Key('username').eq(username)
         )
-        return response.get('Items', [])
+        items = response.get('Items', [])
+        # Combine response chunks into full responses
+        conversation_history = []
+        current_response = ""
+        for item in items:
+            current_response += item['response']
+            if len(current_response) >= 250:
+                conversation_history.append({
+                    'message': item['message'],
+                    'response': current_response
+                })
+                current_response = ""
+        if current_response:
+            conversation_history.append({
+                'message': items[-1]['message'],
+                'response': current_response
+            })
+        return conversation_history
 
     def build_ui(self):
         """Set up frames, text areas, input boxes, etc."""
@@ -454,26 +476,31 @@ class BBSBotApp:
             self.master.after(100, self.process_incoming_messages)
 
     def process_data_chunk(self, data):
-        print(f"Data chunk received: {data}")  # Log data chunks
         """
         Accumulate data in self.partial_line.
-        Split on newline, parse triggers for complete lines.
+        Unify carriage returns, split on newline, parse triggers for complete lines.
         """
+        # Replace all \r\n with \n, then replace remaining \r with \n.
+        data = data.replace('\r\n', '\n').replace('\r', '\n')
+
+        # Accumulate into partial_line
         self.partial_line += data
+
+        # Split on \n to get complete lines
         lines = self.partial_line.split("\n")
 
+        # Process all but the last entry; that last might be incomplete
         for line in lines[:-1]:
             self.append_terminal_text(line + "\n", "normal")
             print(f"Incoming line: {line}")  # Log each incoming line
             self.parse_incoming_triggers(line)
 
-            # If line contains '@', we assume it might be part of the user list
+            # If line contains '@', it might be part of the user list
             if "@" in line:
                 self.user_list_buffer.append(line)
 
-            # If line ends with "are here with you." or "is here with you.", parse entire buffer
+            # If line ends with "are here with you." or "is here with you.", parse the entire buffer
             if re.search(r'(is|are) here with you\.$', line.strip()):
-                # Include this line in the buffer if not already included
                 if line not in self.user_list_buffer:
                     self.user_list_buffer.append(line)
                 self.update_chat_members(self.user_list_buffer)
@@ -504,7 +531,7 @@ class BBSBotApp:
         print(f"[DEBUG] Cleaned combined user lines: {combined_clean}")  # Debug statement
 
         # Refine regex to capture usernames and addresses
-        addresses = re.findall(r'(\b\S+@\S+\.\S+\b|\b\S+\b)', combined_clean)
+        addresses = re.findall(r'\b\S+@\S+\.\S+\b', combined_clean)
         print(f"[DEBUG] Regex match result: {addresses}")  # Debug statement
 
         # Make them a set to avoid duplicates
@@ -1098,7 +1125,8 @@ class BBSBotApp:
         prefix = "Gos " if self.mud_mode.get() else ""
         lines = message.split('\n')
         full_message = prefix + '\n'.join(lines)
-        chunks = self.chunk_message(full_message, 250)
+        chunks = self.chunk_message(full_message, 250)  # Use the new chunk_message!
+
         for chunk in chunks:
             self.append_terminal_text(chunk + "\n", "normal")
             if self.connected and self.writer:
@@ -1108,23 +1136,44 @@ class BBSBotApp:
 
     def chunk_message(self, message, chunk_size):
         """
-        Chunk a message into specified size, ensuring no content is lost.
+        Break a message into chunks, up to `chunk_size` characters each,
+        ensuring no splits in the middle of words or lines.
+
+        1. Split by newline to preserve paragraph boundaries.
+        2. For each paragraph, break it into word-based lines
+           that do not exceed chunk_size.
         """
-        words = message.split()
-        chunks = []
-        current_chunk = []
+        paragraphs = message.split('\n')
+        final_chunks = []
 
-        for word in words:
-            if len(' '.join(current_chunk + [word])) <= chunk_size:
-                current_chunk.append(word)
-            else:
-                chunks.append(' '.join(current_chunk))
-                current_chunk = [word]
+        for para in paragraphs:
+            # If paragraph is totally empty, keep it as a blank line
+            if not para.strip():
+                final_chunks.append('')
+                continue
 
-        if current_chunk:
-            chunks.append(' '.join(current_chunk))
+            words = para.split()
+            current_line_words = []
 
-        return chunks
+            for word in words:
+                if not current_line_words:
+                    # Start a fresh line
+                    current_line_words.append(word)
+                else:
+                    # Test if we can add " word" without exceeding chunk_size
+                    test_line = ' '.join(current_line_words + [word])
+                    if len(test_line) <= chunk_size:
+                        current_line_words.append(word)
+                    else:
+                        # We have to finalize the current line
+                        final_chunks.append(' '.join(current_line_words))
+                        current_line_words = [word]
+
+            # Any leftover words in current_line_words
+            if current_line_words:
+                final_chunks.append(' '.join(current_line_words))
+
+        return final_chunks
 
     def show_favorites_window(self):
         """Open a Toplevel window to manage favorite BBS addresses."""
