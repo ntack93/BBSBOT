@@ -606,6 +606,9 @@ class BBSBotApp:
             self.handle_youtube_command(query)
         elif "!search" in clean_line:
             query = clean_line.split("!search", 1)[1].strip()
+            self.handle_web_search_command(query)
+        elif "!chat" in clean_line:
+            query = clean_line.split("!chat", 1)[1].strip()
             # Extract the username from the line
             username_match = re.match(r'From (.+?):', clean_line)
             username = username_match.group(1) if username_match else "public_chat"
@@ -908,6 +911,10 @@ class BBSBotApp:
         for item in conversation_history:
             messages.append({"role": "user", "content": item['message']})
             messages.append({"role": "assistant", "content": item['response']})
+
+        # (Optional) add a mini fact about who is speaking:
+        if username:
+            messages.append({"role": "system", "content": f"Reminder: The user speaking is named {username}."})
 
         # Finally append this new user_text
         messages.append({"role": "user", "content": user_text})
