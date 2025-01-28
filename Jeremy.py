@@ -1043,7 +1043,7 @@ class BBSBotApp:
         """Return the help message as a string."""
         return (
             "Available commands: Please use a ! immediately followed by one of the following keywords (no space): "
-            "weather <location>, yt <query>, search <query>, chat <message>, news <topic>, map <place>, pic <query>."
+            "weather <location>, yt <query>, search <query>, chat <message>, news <topic>, map <place>, pic <query>, mp3yt <youtube link>."
         )
 
     def append_terminal_text(self, text, default_tag="normal"):
