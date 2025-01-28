@@ -12,6 +12,9 @@ import json
 import os
 import boto3
 from botocore.exceptions import NoCredentialsError, PartialCredentialsError
+from pytube import YouTube
+from pydub import AudioSegment
+import subprocess
 
 ###############################################################################
 # Default/placeholder API keys (updated in Settings window as needed).
@@ -32,7 +35,7 @@ table = dynamodb.Table(table_name)
 class BBSBotApp:
     def __init__(self, master):
         self.master = master
-        self.master.title("BBS Chatbot - Full-line for !search, 250-limit for !chat")
+        self.master.title("BBS Chatbot Jeremy")
 
         # ----------------- Configurable variables ------------------
         self.host = tk.StringVar(value="bbs.example.com")
@@ -568,7 +571,7 @@ class BBSBotApp:
 
     def parse_incoming_triggers(self, line):
         """
-        Check for commands in the given line: !weather, !yt, !search, !chat, !news, !map, !pic, !polly, !help
+        Check for commands in the given line: !weather, !yt, !search, !chat, !news, !map, !pic, !polly, !mp3yt, !help
         And now also capture public messages for conversation history.
         """
         # Remove ANSI codes for easier parsing
@@ -652,6 +655,9 @@ class BBSBotApp:
         elif "!polly" in clean_line:
             text = clean_line.split("!polly", 1)[1].strip()
             self.handle_polly_command(text)
+        elif "!mp3yt" in clean_line:
+            url = clean_line.split("!mp3yt", 1)[1].strip()
+            self.handle_ytmp3_command(url)
         elif "!help" in clean_line:
             self.handle_help_command()
 
@@ -1378,6 +1384,9 @@ class BBSBotApp:
                     elif "!polly" in clean_line:
                         text = clean_line.split("!polly", 1)[1].strip()
                         self.handle_polly_command(text)
+                    elif "!mp3yt" in clean_line:
+                        url = clean_line.split("!mp3yt", 1)[1].strip()
+                        self.handle_ytmp3_command(url)
                     elif "!help" in clean_line:
                         self.handle_help_command()
 
@@ -1784,6 +1793,11 @@ class BBSBotApp:
 
     def handle_polly_command(self, text):
         """Convert text to speech using AWS Polly and provide an S3 link to the MP3 file."""
+        if len(text) > 200:
+            response_message = "Error: The text for Polly must be 200 characters or fewer."
+            self.send_full_message(response_message)
+            return
+
         polly_client = boto3.client('polly', region_name='us-east-1')
         s3_client = boto3.client('s3', region_name='us-east-1')
         bucket_name = 'bbs-audio-files'
@@ -1808,6 +1822,41 @@ class BBSBotApp:
             response_message = f"Here is your Polly audio: {s3_url}"
         except Exception as e:
             response_message = f"Error with Polly: {str(e)}"
+
+        self.send_full_message(response_message)
+
+    def handle_ytmp3_command(self, url):
+        """Download YouTube video as MP3, upload to S3, and provide the link."""
+        try:
+            # Use yt-dlp to download and convert the YouTube video to MP3
+            result = subprocess.run(
+                ["yt-dlp", "-x", "--audio-format", "mp3", url, "-o", "/tmp/%(id)s.%(ext)s"],
+                capture_output=True,
+                text=True
+            )
+            if result.returncode != 0:
+                raise Exception(result.stderr)
+
+            # Extract the video ID from the URL
+            video_id = url.split("v=")[1].split("&")[0]
+            mp3_filename = f"/tmp/{video_id}.mp3"
+
+            s3_client = boto3.client('s3', region_name='us-east-1')
+            bucket_name = 'bbs-audio-files'
+            object_key = f"ytmp3_{video_id}.mp3"
+
+            with open(mp3_filename, 'rb') as mp3_file:
+                s3_client.put_object(
+                    Bucket=bucket_name,
+                    Key=object_key,
+                    Body=mp3_file,
+                    ContentType='audio/mpeg'
+                )
+
+            s3_url = f"https://{bucket_name}.s3.amazonaws.com/{object_key}"
+            response_message = f"Here is your MP3: {s3_url}"
+        except Exception as e:
+            response_message = f"Error processing YouTube link: {str(e)}"
 
         self.send_full_message(response_message)
 

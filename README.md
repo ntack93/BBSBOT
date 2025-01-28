@@ -129,7 +129,7 @@ To enable conversation persistence using DynamoDB, follow these steps:
 
 1. Run the application:
     ```sh
-    python BBSCHATBOT1.1.py
+    python jeremy.py
     ```
 
 2. Use the GUI to enter the BBS host and port, then click "Connect" to establish a connection.
@@ -160,7 +160,7 @@ To enable conversation persistence using DynamoDB, follow these steps:
 
 ## File Structure
 
-- [BBSCHATBOT1.1.py](http://_vscodecontentref_/0): Main application script.
+- [jeremy.py](http://_vscodecontentref_/0): Main application script.
 - [ui.html](http://_vscodecontentref_/1): HTML file for the GUI.
 - [ui.js](http://_vscodecontentref_/2): JavaScript file for handling UI interactions.
 - [settings.json](http://_vscodecontentref_/3): VS Code settings for the project.
