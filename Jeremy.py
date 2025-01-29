@@ -79,6 +79,7 @@ class BBSBotApp:
         self.favorites_window = None  # Track the Favorites window instance
 
         self.chat_members = set()  # Set to keep track of chat members
+        self.last_seen = {}  # Dictionary to store the last seen timestamp of each user
 
         # Build UI
         self.build_ui()
@@ -97,6 +98,7 @@ class BBSBotApp:
         self.previous_line = ""  # Store the previous line to detect multi-line triggers
         self.user_list_buffer = []  # Buffer to accumulate user list lines
         self.timers = {}  # Dictionary to store active timers
+        self.auto_greeting_enabled = True  # Attribute to track auto-greeting state
 
     def create_dynamodb_table(self):
         """Create DynamoDB table if it doesn't exist."""
@@ -538,9 +540,24 @@ class BBSBotApp:
         addresses = re.findall(r'\b\S+@\S+\.\S+\b', combined_clean)
         print(f"[DEBUG] Regex match result: {addresses}")  # Debug statement
 
+        # Extract usernames from addresses
+        usernames = [address.split('@')[0] for address in addresses]
+
+        # Handle the case where the last user is listed without an email address
+        last_user_match = re.search(r'and (\S+) are here with you\.', combined_clean)
+        if last_user_match:
+            usernames.append(last_user_match.group(1))
+
+        print(f"[DEBUG] Extracted usernames: {usernames}")  # Debug statement
+
         # Make them a set to avoid duplicates
-        self.chat_members = set(addresses)
+        self.chat_members = set(usernames)
         self.save_chat_members()  # Save updated chat members to DynamoDB
+
+        # Update last seen timestamps
+        current_time = int(time.time())
+        for member in self.chat_members:
+            self.last_seen[member.lower()] = current_time
 
         print(f"[DEBUG] Updated chat members: {self.chat_members}")
 
@@ -572,7 +589,7 @@ class BBSBotApp:
 
     def parse_incoming_triggers(self, line):
         """
-        Check for commands in the given line: !weather, !yt, !search, !chat, !news, !map, !pic, !polly, !mp3yt, !help
+        Check for commands in the given line: !weather, !yt, !search, !chat, !news, !map, !pic, !polly, !mp3yt, !help, !seen, !greeting
         And now also capture public messages for conversation history.
         """
         # Remove ANSI codes for easier parsing
@@ -670,6 +687,11 @@ class BBSBotApp:
                 self.handle_timer_command(label, value, unit, username)
         elif "!help" in clean_line:
             self.handle_help_command()
+        elif "!seen" in clean_line:
+            target_username = clean_line.split("!seen", 1)[1].strip()
+            self.handle_seen_command(target_username)
+        elif "!greeting" in clean_line:
+            self.handle_greeting_command()
 
         # Update the previous line
         self.previous_line = clean_line
@@ -1408,6 +1430,11 @@ class BBSBotApp:
                             self.handle_timer_command(label, value, unit, username)
                     elif "!help" in clean_line:
                         self.handle_help_command()
+                    elif "!seen" in clean_line:
+                        target_username = clean_line.split("!seen", 1)[1].strip()
+                        self.handle_seen_command(target_username)
+                    elif "!greeting" in clean_line:
+                        self.handle_greeting_command()
 
         # Update the previous line
         self.previous_line = clean_line
@@ -1730,6 +1757,9 @@ class BBSBotApp:
         """
         Handle user-specific greeting when they enter the chatroom.
         """
+        if not self.auto_greeting_enabled:
+            return
+
         self.send_enter_keystroke()  # Send ENTER keystroke to get the list of users
         time.sleep(1)  # Wait for the response to be processed
         current_members = self.chat_members.copy()
@@ -1908,6 +1938,27 @@ class BBSBotApp:
         timer_id = f"{username}_{label}"
         if timer_id in self.timers:
             del self.timers[timer_id]
+
+    def handle_greeting_command(self):
+        """Toggle the auto-greeting feature on and off."""
+        self.auto_greeting_enabled = not self.auto_greeting_enabled
+        state = "enabled" if self.auto_greeting_enabled else "disabled"
+        response = f"Auto-greeting has been {state}."
+        self.send_full_message(response)
+
+    def handle_seen_command(self, username):
+        """Handle the !seen command to report the last seen timestamp of a user."""
+        username_lower = username.lower()
+        last_seen_lower = {k.lower(): v for k, v in self.last_seen.items()}
+
+        if username_lower in last_seen_lower:
+            last_seen_time = last_seen_lower[username_lower]
+            last_seen_str = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(last_seen_time))
+            response = f"{username} was last seen on {last_seen_str}."
+        else:
+            response = f"{username} has not been seen in the chatroom."
+
+        self.send_full_message(response)
 
 def main():
     try:
