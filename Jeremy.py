@@ -79,7 +79,7 @@ class BBSBotApp:
         self.favorites_window = None  # Track the Favorites window instance
 
         self.chat_members = set()  # Set to keep track of chat members
-        self.last_seen = {}  # Dictionary to store the last seen timestamp of each user
+        self.last_seen = self.load_last_seen()  # Load last seen timestamps from file
 
         # Build UI
         self.build_ui()
@@ -558,6 +558,8 @@ class BBSBotApp:
         current_time = int(time.time())
         for member in self.chat_members:
             self.last_seen[member.lower()] = current_time
+
+        self.save_last_seen()  # Save updated last seen timestamps to file
 
         print(f"[DEBUG] Updated chat members: {self.chat_members}")
 
@@ -1959,6 +1961,18 @@ class BBSBotApp:
             response = f"{username} has not been seen in the chatroom."
 
         self.send_full_message(response)
+
+    def save_last_seen(self):
+        """Save the last seen dictionary to a file."""
+        with open("last_seen.json", "w") as file:
+            json.dump(self.last_seen, file)
+
+    def load_last_seen(self):
+        """Load the last seen dictionary from a file."""
+        if os.path.exists("last_seen.json"):
+            with open("last_seen.json", "r") as file:
+                return json.load(file)
+        return {}
 
 def main():
     try:
