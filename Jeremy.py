@@ -96,6 +96,7 @@ class BBSBotApp:
         self.create_dynamodb_table()
         self.previous_line = ""  # Store the previous line to detect multi-line triggers
         self.user_list_buffer = []  # Buffer to accumulate user list lines
+        self.timers = {}  # Dictionary to store active timers
 
     def create_dynamodb_table(self):
         """Create DynamoDB table if it doesn't exist."""
@@ -571,7 +572,7 @@ class BBSBotApp:
 
     def parse_incoming_triggers(self, line):
         """
-        Check for commands in the given line: !weather, !yt, !search, !chat, !news, !map, !pic, !polly, !mp3yt, !timer, !help
+        Check for commands in the given line: !weather, !yt, !search, !chat, !news, !map, !pic, !polly, !mp3yt, !help
         And now also capture public messages for conversation history.
         """
         # Remove ANSI codes for easier parsing
@@ -653,19 +654,20 @@ class BBSBotApp:
             query = clean_line.split("!pic", 1)[1].strip()
             self.handle_pic_command(query)
         elif "!polly" in clean_line:
-            text = clean_line.split("!polly", 1)[1].strip()
-            self.handle_polly_command(text)
+            parts = clean_line.split("!polly", 1)[1].strip().split(maxsplit=1)
+            if len(parts) == 2:
+                voice, text = parts
+                self.handle_polly_command(voice, text)
+            else:
+                self.send_full_message("Please choose a Polly voice and provide text to convert. The voices are: Matthew, Stephen, Ruth, Joanna, Danielle.")
         elif "!mp3yt" in clean_line:
             url = clean_line.split("!mp3yt", 1)[1].strip()
             self.handle_ytmp3_command(url)
         elif "!timer" in clean_line:
             parts = clean_line.split("!timer", 1)[1].strip().split()
-            if len(parts) == 2:
-                value, unit = parts
-                # Extract the username from the line
-                username_match = re.match(r'From (.+?):', clean_line)
-                username = username_match.group(1) if username_match else "public_chat"
-                self.handle_timer_command(value, unit, username)
+            if len(parts) == 3:
+                label, value, unit = parts
+                self.handle_timer_command(label, value, unit, username)
         elif "!help" in clean_line:
             self.handle_help_command()
 
@@ -702,13 +704,6 @@ class BBSBotApp:
         elif "!pic" in message:
             query = message.split("!pic", 1)[1].strip()
             response = self.get_pic_response(query)
-        elif "!timer" in message:
-            parts = message.split("!timer", 1)[1].strip().split()
-            if len(parts) == 2:
-                value, unit = parts
-                self.handle_timer_command(value, unit, username)
-            else:
-                response = "Invalid timer format. Use '!timer <value> <seconds or minutes>'."
         elif "!help" in message:
             response = self.get_help_response()
         else:
@@ -1397,19 +1392,20 @@ class BBSBotApp:
                         query = clean_line.split("!pic", 1)[1].strip()
                         self.handle_pic_command(query)
                     elif "!polly" in clean_line:
-                        text = clean_line.split("!polly", 1)[1].strip()
-                        self.handle_polly_command(text)
+                        parts = clean_line.split("!polly", 1)[1].strip().split(maxsplit=1)
+                        if len(parts) == 2:
+                            voice, text = parts
+                            self.handle_polly_command(voice, text)
+                        else:
+                            self.send_full_message("Please choose a Polly voice and provide text to convert. The voices are: Matthew, Stephen, Ruth, Joanna, Danielle.")
                     elif "!mp3yt" in clean_line:
                         url = clean_line.split("!mp3yt", 1)[1].strip()
                         self.handle_ytmp3_command(url)
                     elif "!timer" in clean_line:
                         parts = clean_line.split("!timer", 1)[1].strip().split()
-                        if len(parts) == 2:
-                            value, unit = parts
-                            # Extract the username from the line
-                            username_match = re.match(r'From (.+?):', clean_line)
-                            username = username_match.group(1) if username_match else "public_chat"
-                            self.handle_timer_command(value, unit, username)
+                        if len(parts) == 3:
+                            label, value, unit = parts
+                            self.handle_timer_command(label, value, unit, username)
                     elif "!help" in clean_line:
                         self.handle_help_command()
 
@@ -1441,13 +1437,6 @@ class BBSBotApp:
         elif "!pic" in message:
             query = message.split("!pic", 1)[1].strip()
             response = self.get_pic_response(query)
-        elif "!timer" in message:
-            parts = message.split("!timer", 1)[1].strip().split()
-            if len(parts) == 2:
-                value, unit = parts
-                self.handle_timer_command(value, unit, username)
-            else:
-                response = "Invalid timer format. Use '!timer <value> <seconds or minutes>'."
         elif "!help" in message:
             response = self.get_help_response()
         else:
@@ -1515,8 +1504,7 @@ class BBSBotApp:
         """Provide a list of available commands, adhering to character and chunk limits."""
         help_message = (
             "Available commands: Please use a ! immediately followed by one of the following keywords (no space): "
-            "weather <location>, yt <query>, search <query>, chat <message>, news <topic>, map <place>, pic <query>, "
-            "polly <text>, mp3yt <youtube link>, timer <value> <seconds or minutes>."
+            "weather <location>, yt <query>, search <query>, chat <message>, news <topic>, map <place>, pic <query>."
         )
 
         # Send the help message as a single chunk if possible
@@ -1822,8 +1810,14 @@ class BBSBotApp:
             except Exception as e:
                 return f"Error fetching news: {str(e)}"
 
-    def handle_polly_command(self, text):
+    def handle_polly_command(self, voice, text):
         """Convert text to speech using AWS Polly and provide an S3 link to the MP3 file."""
+        valid_voices = ["Matthew", "Stephen", "Ruth", "Joanna", "Danielle"]
+        if voice not in valid_voices:
+            response_message = f"Invalid voice. Please choose from: {', '.join(valid_voices)}."
+            self.send_full_message(response_message)
+            return
+
         if len(text) > 200:
             response_message = "Error: The text for Polly must be 200 characters or fewer."
             self.send_full_message(response_message)
@@ -1838,7 +1832,7 @@ class BBSBotApp:
             response = polly_client.synthesize_speech(
                 Text=text,
                 OutputFormat='mp3',
-                VoiceId='Justin'
+                VoiceId=voice
             )
             audio_stream = response['AudioStream'].read()
 
@@ -1891,28 +1885,29 @@ class BBSBotApp:
 
         self.send_full_message(response_message)
 
-    def handle_timer_command(self, value, unit, username):
-        """Handle the !timer command to set a timer."""
+    def handle_timer_command(self, label, value, unit, username):
+        """Set a timer and notify the user when it completes."""
         try:
             value = int(value)
-            if unit not in ["seconds", "minutes"]:
-                raise ValueError("Invalid unit")
+            if unit not in ["second", "seconds", "minute", "minutes"]:
+                raise ValueError("Invalid time unit")
             
-            if unit == "minutes":
-                value *= 60  # Convert minutes to seconds
-
-            timer_thread = threading.Timer(value, self.timer_expired, args=[username, value, unit])
-            timer_thread.start()
-            response_message = f"Timer set for {value // 60 if unit == 'minutes' else value} {unit}."
-        except ValueError:
-            response_message = "Invalid timer value or unit. Use '!timer <value> <seconds or minutes>'."
+            duration = value * 60 if "minute" in unit else value
+            timer_id = f"{username}_{label}"
+            self.timers[timer_id] = self.master.after(duration * 1000, self.timer_complete, label, username)
+            response = f"Timer '{label}' set for {value} {unit}."
+        except ValueError as e:
+            response = f"Error setting timer: {str(e)}"
         
-        self.send_direct_message(username, response_message)
+        self.send_direct_message(username, response)
 
-    def timer_expired(self, username, value, unit):
-        """Notify the user that their timer has expired."""
-        message = f">{username} Your {value // 60 if unit == 'minutes' else value} {unit} timer has expired."
-        self.send_direct_message(username, message)
+    def timer_complete(self, label, username):
+        """Notify the user that their timer is complete."""
+        response = f"Timer '{label}' is complete!"
+        self.send_direct_message(username, response)
+        timer_id = f"{username}_{label}"
+        if timer_id in self.timers:
+            del self.timers[timer_id]
 
 def main():
     try:
