@@ -15,7 +15,6 @@ BBS Chat Bot is a Python application that functions as a BBS Teleconference Bot.
 - Use `!news <topic>` for news searches via newsapi.org.
 - Use `!map <place>` to fetch place information from Google Places API.
 - Use `!pic <query>` to fetch a random picture from Pexels.
-- Use `!timer <value> <seconds or minutes>` to set a timer and receive a notification when it expires.
 - Use `/P <username> <message>` to send and receive pages with query responses.
 - **NEW**: Conversation persistence using DynamoDB.
 - **NEW**: Split view to create multiple bot instances. *still in development*
