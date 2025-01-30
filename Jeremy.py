@@ -55,6 +55,8 @@ class BBSBotApp:
         self.remember_password = tk.BooleanVar(value=False)
         self.in_teleconference = False  # Flag to track teleconference state
         self.mud_mode = tk.BooleanVar(value=False)
+        self.alpha_vantage_api_key = tk.StringVar(value="")  # Add Alpha Vantage API Key
+        self.coinmarketcap_api_key = tk.StringVar(value="")  # Add CoinMarketCap API Key
 
         # For best ANSI alignment, recommend a CP437-friendly monospace font:
         self.font_name = tk.StringVar(value="Courier New")
@@ -301,6 +303,16 @@ class BBSBotApp:
         ttk.Entry(settings_win, textvariable=self.pexels_api_key, width=40).grid(row=row_index, column=1, padx=5, pady=5)
         row_index += 1
 
+        # ----- Alpha Vantage API Key -----
+        ttk.Label(settings_win, text="Alpha Vantage API Key:").grid(row=row_index, column=0, padx=5, pady=5, sticky=tk.E)
+        ttk.Entry(settings_win, textvariable=self.alpha_vantage_api_key, width=40).grid(row=row_index, column=1, padx=5, pady=5)
+        row_index += 1
+
+        # ----- CoinMarketCap API Key -----
+        ttk.Label(settings_win, text="CoinMarketCap API Key:").grid(row=row_index, column=0, padx=5, pady=5, sticky=tk.E)
+        ttk.Entry(settings_win, textvariable=self.coinmarketcap_api_key, width=40).grid(row=row_index, column=1, padx=5, pady=5)
+        row_index += 1
+
         # ----- Font Name -----
         ttk.Label(settings_win, text="Font Name:").grid(row=row_index, column=0, padx=5, pady=5, sticky=tk.E)
         font_options = ["Courier New", "Px437 IBM VGA8", "Terminus (TTF)", "Consolas", "Lucida Console"]
@@ -338,7 +350,42 @@ class BBSBotApp:
         """Called when user clicks 'Save' in the settings window."""
         self.update_display_font()
         openai.api_key = self.openai_api_key.get()
+        # Save new API keys
+        self.save_api_keys()
         window.destroy()
+
+    def save_api_keys(self):
+        """Save API keys to a file."""
+        api_keys = {
+            "openai_api_key": self.openai_api_key.get(),
+            "weather_api_key": self.weather_api_key.get(),
+            "youtube_api_key": self.youtube_api_key.get(),
+            "google_cse_api_key": self.google_cse_api_key.get(),
+            "google_cse_cx": self.google_cse_cx.get(),
+            "news_api_key": self.news_api_key.get(),
+            "google_places_api_key": self.google_places_api_key.get(),
+            "pexels_api_key": self.pexels_api_key.get(),
+            "alpha_vantage_api_key": self.alpha_vantage_api_key.get(),
+            "coinmarketcap_api_key": self.coinmarketcap_api_key.get()
+        }
+        with open("api_keys.json", "w") as file:
+            json.dump(api_keys, file)
+
+    def load_api_keys(self):
+        """Load API keys from a file."""
+        if os.path.exists("api_keys.json"):
+            with open("api_keys.json", "r") as file:
+                api_keys = json.load(file)
+                self.openai_api_key.set(api_keys.get("openai_api_key", ""))
+                self.weather_api_key.set(api_keys.get("weather_api_key", ""))
+                self.youtube_api_key.set(api_keys.get("youtube_api_key", ""))
+                self.google_cse_api_key.set(api_keys.get("google_cse_api_key", ""))
+                self.google_cse_cx.set(api_keys.get("google_cse_cx", ""))
+                self.news_api_key.set(api_keys.get("news_api_key", ""))
+                self.google_places_api_key.set(api_keys.get("google_places_api_key", ""))
+                self.pexels_api_key.set(api_keys.get("pexels_api_key", ""))
+                self.alpha_vantage_api_key.set(api_keys.get("alpha_vantage_api_key", ""))
+                self.coinmarketcap_api_key.set(api_keys.get("coinmarketcap_api_key", ""))
 
     def update_display_font(self):
         """Update the Text widget's font based on self.font_name and self.font_size."""
@@ -1483,6 +1530,12 @@ class BBSBotApp:
             response = self.get_pic_response(query)
         elif "!help" in message:
             response = self.get_help_response()
+        elif "!stocks" in message:
+            symbol = message.split("!stocks", 1)[1].strip()
+            response = self.get_stock_price(symbol)
+        elif "!crypto" in message:
+            crypto = message.split("!crypto", 1)[1].strip()
+            response = self.get_crypto_price(crypto)
         else:
             # Assume it's a message for the !chat trigger
             response = self.get_chatgpt_response(message, username=username)
@@ -1526,6 +1579,12 @@ class BBSBotApp:
             response = self.get_pic_response(query)
         elif "!help" in message:
             response = self.get_help_response()
+        elif "!stocks" in message:
+            symbol = message.split("!stocks", 1)[1].strip()
+            response = self.get_stock_price(symbol)
+        elif "!crypto" in message:
+            crypto = message.split("!crypto", 1)[1].strip()
+            response = self.get_crypto_price(crypto)
         else:
             response = "Unknown command."
 
@@ -1991,7 +2050,7 @@ class BBSBotApp:
 
     def get_stock_price(self, symbol):
         """Fetch the current price of a stock."""
-        api_key = "YOUR_ALPHAVANTAGE_API_KEY"  # Replace with your Alpha Vantage API key
+        api_key = self.alpha_vantage_api_key.get()
         url = f"https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol={symbol}&apikey={api_key}"
         try:
             response = requests.get(url)
@@ -2003,7 +2062,7 @@ class BBSBotApp:
 
     def get_crypto_price(self, crypto):
         """Fetch the current price of a cryptocurrency."""
-        api_key = "YOUR_COINMARKETCAP_API_KEY"  # Replace with your CoinMarketCap API key
+        api_key = self.coinmarketcap_api_key.get()
         url = f"https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest?symbol={crypto}"
         headers = {
             "X-CMC_PRO_API_KEY": api_key
@@ -2018,12 +2077,18 @@ class BBSBotApp:
 
     def handle_stock_command(self, symbol):
         """Handle the !stocks command to show the current price of a stock."""
-        response = self.get_stock_price(symbol)
+        if not self.alpha_vantage_api_key.get():
+            response = "Alpha Vantage API key is missing."
+        else:
+            response = self.get_stock_price(symbol)
         self.send_full_message(response[:50])  # Ensure the response is no more than 50 characters
 
     def handle_crypto_command(self, crypto):
         """Handle the !crypto command to show the current price of a cryptocurrency."""
-        response = self.get_crypto_price(crypto)
+        if not self.coinmarketcap_api_key.get():
+            response = "CoinMarketCap API key is missing."
+        else:
+            response = self.get_crypto_price(crypto)
         self.send_full_message(response[:50])  # Ensure the response is no more than 50 characters
 
 def main():

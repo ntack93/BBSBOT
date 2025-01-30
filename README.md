@@ -15,6 +15,8 @@ BBS Chat Bot is a Python application that functions as a BBS Teleconference Bot.
 - Use `!news <topic>` for news searches via newsapi.org.
 - Use `!map <place>` to fetch place information from Google Places API.
 - Use `!pic <query>` to fetch a random picture from Pexels.
+- Use `!stocks <symbol>` to fetch the current price of a stock.
+- Use `!crypto <symbol>` to fetch the current price of a cryptocurrency.
 - Use `/P <username> <message>` to send and receive pages with query responses.
 - **NEW**: Conversation persistence using DynamoDB.
 - **NEW**: Split view to create multiple bot instances. *still in development*
@@ -102,6 +104,18 @@ To use the various `!triggers` in the bot, you need to set up API keys for diffe
 2. Navigate to the API section and generate a new API key.
 3. Copy the API key and enter it in the Settings window under "Pexels API Key".
 
+### Alpha Vantage API Key
+
+1. Sign up for an account at [Alpha Vantage](https://www.alphavantage.co/).
+2. Navigate to the API section and generate a new API key.
+3. Copy the API key and enter it in the Settings window under "Alpha Vantage API Key".
+
+### CoinMarketCap API Key
+
+1. Sign up for an account at [CoinMarketCap](https://coinmarketcap.com/).
+2. Navigate to the API section and generate a new API key.
+3. Copy the API key and enter it in the Settings window under "CoinMarketCap API Key".
+
 ## DynamoDB Setup
 
 To enable conversation persistence using DynamoDB, follow these steps:
@@ -147,6 +161,8 @@ To enable conversation persistence using DynamoDB, follow these steps:
     - **News API Key**: Required for the `!news` trigger to fetch news headlines.
     - **Google Places API Key**: Required for the `!map` trigger to fetch place information.
     - **Pexels API Key**: Required for the `!pic` trigger to fetch random pictures.
+    - **Alpha Vantage API Key**: Required for the `!stocks` trigger to fetch stock prices.
+    - **CoinMarketCap API Key**: Required for the `!crypto` trigger to fetch cryptocurrency prices.
 
 6. To use the paging feature, send a page using the syntax `/P <username> <message>`. For example:
     ```sh
