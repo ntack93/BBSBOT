@@ -845,10 +845,19 @@ class BBSBotApp:
         elif "!crypto" in message:
             crypto = message.split("!crypto", 1)[1].strip()
             response = self.get_crypto_price(crypto)
+        elif "!who" in message:
+            response = self.get_who_response()
         else:
             response = "Unknown command."
 
         self.send_page_response(username, module_or_channel, response)
+
+    def get_who_response(self):
+        """Return a list of users currently in the chatroom."""
+        if not self.chat_members:
+            return "No users currently in the chatroom."
+        else:
+            return "Users currently in the chatroom: " + ", ".join(self.chat_members)
 
     def send_page_response(self, username, module_or_channel, message):
         """
@@ -1149,8 +1158,15 @@ class BBSBotApp:
         """Return the help message as a string."""
         return (
             "Available commands: Please use a ! immediately followed by one of the following keywords (no space): "
-            "weather <location>, yt <query>, search <query>, chat <message>, news <topic>, map <place>, pic <query>, mp3yt <youtube link>."
+            "weather <location>, yt <query>, search <query>, chat <message>, news <topic>, map <place>, pic <query>, "
+            "polly <voice> <text>, mp3yt <youtube link>, timer <label> <value> <unit>, help, seen <username>, "
+            "greeting, stocks <symbol>, crypto <symbol>."
         )
+
+    def handle_help_command(self):
+        """Provide a list of available commands, adhering to character and chunk limits."""
+        help_message = self.get_help_response()
+        self.send_full_message(help_message)
 
     def append_terminal_text(self, text, default_tag="normal"):
         """Append text to the terminal display with ANSI parsing."""
@@ -1598,32 +1614,26 @@ class BBSBotApp:
         elif "!crypto" in message:
             crypto = message.split("!crypto", 1)[1].strip()
             response = self.get_crypto_price(crypto)
+        elif "!who" in message:
+            response = self.get_who_response()
         else:
             response = "Unknown command."
 
         self.send_page_response(username, module_or_channel, response)
 
-    def send_page_response(self, username, module_or_channel, message):
-        """
-        Send a page response to the specified user and module/channel.
-        """
-        chunks = self.chunk_message(message, 250)
-        for chunk in chunks:
-            full_message = f"/P {username} {chunk}"
-            asyncio.run_coroutine_threadsafe(self._send_message(full_message + "\r\n"), self.loop)
-            self.append_terminal_text(full_message + "\n", "normal")
+    def get_who_response(self):
+        """Return a list of users currently in the chatroom."""
+        if not self.chat_members:
+            return "No users currently in the chatroom."
+        else:
+            return "Users currently in the chatroom: " + ", ".join(self.chat_members)
 
     ########################################################################
     #                           Help
     ########################################################################
     def handle_help_command(self):
         """Provide a list of available commands, adhering to character and chunk limits."""
-        help_message = (
-            "Available commands: Please use a ! immediately followed by one of the following keywords (no space): "
-            "weather <location>, yt <query>, search <query>, chat <message>, news <topic>, map <place>, pic <query>."
-        )
-
-        # Send the help message as a single chunk if possible
+        help_message = self.get_help_response()
         self.send_full_message(help_message)
 
     ########################################################################
