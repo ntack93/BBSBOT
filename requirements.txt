@@ -1,0 +1,13 @@
+tkinter
+threading
+asyncio
+telnetlib3
+requests
+openai
+boto3
+pytube
+pydub
+subprocess
+```
+
+This `requirements.txt` file includes the necessary libraries for the project. Note that `tkinter` and `threading` are part of the Python standard library and do not need to be installed separately. However, they are listed here for completeness.
