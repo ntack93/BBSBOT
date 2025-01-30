@@ -98,7 +98,7 @@ class BBSBotApp:
         self.previous_line = ""  # Store the previous line to detect multi-line triggers
         self.user_list_buffer = []  # Buffer to accumulate user list lines
         self.timers = {}  # Dictionary to store active timers
-        self.auto_greeting_enabled = True  # Attribute to track auto-greeting state
+        self.auto_greeting_enabled = False  # Default auto-greeting to off
 
     def create_dynamodb_table(self):
         """Create DynamoDB table if it doesn't exist."""
