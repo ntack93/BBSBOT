@@ -591,7 +591,7 @@ class BBSBotApp:
 
     def parse_incoming_triggers(self, line):
         """
-        Check for commands in the given line: !weather, !yt, !search, !chat, !news, !map, !pic, !polly, !mp3yt, !help, !seen, !greeting
+        Check for commands in the given line: !weather, !yt, !search, !chat, !news, !map, !pic, !polly, !mp3yt, !help, !seen, !greeting, !stocks, !crypto
         And now also capture public messages for conversation history.
         """
         # Remove ANSI codes for easier parsing
@@ -694,6 +694,12 @@ class BBSBotApp:
             self.handle_seen_command(target_username)
         elif "!greeting" in clean_line:
             self.handle_greeting_command()
+        elif "!stocks" in clean_line:
+            symbol = clean_line.split("!stocks", 1)[1].strip()
+            self.handle_stock_command(symbol)
+        elif "!crypto" in clean_line:
+            crypto = clean_line.split("!crypto", 1)[1].strip()
+            self.handle_crypto_command(crypto)
 
         # Update the previous line
         self.previous_line = clean_line
@@ -730,6 +736,12 @@ class BBSBotApp:
             response = self.get_pic_response(query)
         elif "!help" in message:
             response = self.get_help_response()
+        elif "!stocks" in message:
+            symbol = message.split("!stocks", 1)[1].strip()
+            response = self.get_stock_price(symbol)
+        elif "!crypto" in message:
+            crypto = message.split("!crypto", 1)[1].strip()
+            response = self.get_crypto_price(crypto)
         else:
             # Assume it's a message for the !chat trigger
             response = self.get_chatgpt_response(message, username=username)
@@ -773,6 +785,12 @@ class BBSBotApp:
             response = self.get_pic_response(query)
         elif "!help" in message:
             response = self.get_help_response()
+        elif "!stocks" in message:
+            symbol = message.split("!stocks", 1)[1].strip()
+            response = self.get_stock_price(symbol)
+        elif "!crypto" in message:
+            crypto = message.split("!crypto", 1)[1].strip()
+            response = self.get_crypto_price(crypto)
         else:
             response = "Unknown command."
 
@@ -1438,9 +1456,6 @@ class BBSBotApp:
                     elif "!greeting" in clean_line:
                         self.handle_greeting_command()
 
-        # Update the previous line
-        self.previous_line = clean_line
-
     def handle_private_trigger(self, username, message):
         """
         Handle private message triggers and respond privately.
@@ -1973,6 +1988,43 @@ class BBSBotApp:
             with open("last_seen.json", "r") as file:
                 return json.load(file)
         return {}
+
+    def get_stock_price(self, symbol):
+        """Fetch the current price of a stock."""
+        api_key = "YOUR_ALPHAVANTAGE_API_KEY"  # Replace with your Alpha Vantage API key
+        url = f"https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol={symbol}&apikey={api_key}"
+        try:
+            response = requests.get(url)
+            data = response.json()
+            price = data["Global Quote"]["05. price"]
+            return f"{symbol.upper()}: ${price}"
+        except Exception as e:
+            return f"Error fetching stock price: {str(e)}"
+
+    def get_crypto_price(self, crypto):
+        """Fetch the current price of a cryptocurrency."""
+        api_key = "YOUR_COINMARKETCAP_API_KEY"  # Replace with your CoinMarketCap API key
+        url = f"https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest?symbol={crypto}"
+        headers = {
+            "X-CMC_PRO_API_KEY": api_key
+        }
+        try:
+            response = requests.get(url, headers=headers)
+            data = response.json()
+            price = data["data"][crypto]["quote"]["USD"]["price"]
+            return f"{crypto.upper()}: ${price:.2f}"
+        except Exception as e:
+            return f"Error fetching crypto price: {str(e)}"
+
+    def handle_stock_command(self, symbol):
+        """Handle the !stocks command to show the current price of a stock."""
+        response = self.get_stock_price(symbol)
+        self.send_full_message(response[:50])  # Ensure the response is no more than 50 characters
+
+    def handle_crypto_command(self, crypto):
+        """Handle the !crypto command to show the current price of a cryptocurrency."""
+        response = self.get_crypto_price(crypto)
+        self.send_full_message(response[:50])  # Ensure the response is no more than 50 characters
 
 def main():
     try:
