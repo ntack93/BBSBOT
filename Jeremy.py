@@ -26,6 +26,9 @@ DEFAULT_GOOGLE_CSE_KEY = ""  # Google Custom Search API Key
 DEFAULT_GOOGLE_CSE_CX = ""   # Google Custom Search Engine ID (cx)
 DEFAULT_NEWS_API_KEY = ""    # NewsAPI Key
 DEFAULT_GOOGLE_PLACES_API_KEY = ""  # Google Places API Key
+DEFAULT_PEXELS_API_KEY = ""  # Pexels API Key
+DEFAULT_ALPHA_VANTAGE_API_KEY = ""  # Alpha Vantage API Key
+DEFAULT_COINMARKETCAP_API_KEY = ""  # CoinMarketCap API Key
 
 # Initialize DynamoDB client
 dynamodb = boto3.resource('dynamodb', region_name='us-east-1')
@@ -717,12 +720,6 @@ class BBSBotApp:
                 url = message.split("!mp3yt", 1)[1].strip()
                 self.handle_ytmp3_command(url)
                 return
-            elif "!timer" in message:
-                parts = message.split("!timer", 1)[1].strip().split()
-                if len(parts) == 3:
-                    label, value, unit = parts
-                    self.handle_timer_command(label, value, unit, username)
-                return
             elif "!help" in message:
                 self.handle_help_command()
                 return
@@ -754,6 +751,9 @@ class BBSBotApp:
             self.handle_user_greeting(username)
         elif re.match(r'Topic: \(.*?\)\.\s*(.*?)\s*are here with you\.', clean_line, re.DOTALL):
             self.update_chat_members(clean_line)
+        elif re.match(r'(.+?)@(.+?) \(.*?\) is now online\.  Total users: \d+\.', clean_line):
+            # This line indicates a user logged onto the BBS, not necessarily entered the chatroom
+            return
 
         # Update the previous line
         self.previous_line = clean_line
@@ -847,6 +847,9 @@ class BBSBotApp:
             response = self.get_crypto_price(crypto)
         elif "!who" in message:
             response = self.get_who_response()
+        elif "!seen" in message:
+            target_username = message.split("!seen", 1)[1].strip()
+            response = self.get_seen_response(target_username)
         else:
             response = "Unknown command."
 
@@ -1159,7 +1162,7 @@ class BBSBotApp:
         return (
             "Available commands: Please use a ! immediately followed by one of the following keywords (no space): "
             "weather <location>, yt <query>, search <query>, chat <message>, news <topic>, map <place>, pic <query>, "
-            "polly <voice> <text>, mp3yt <youtube link>, timer <label> <value> <unit>, help, seen <username>, "
+            "polly <voice> <text>, mp3yt <youtube link>, help, seen <username>, "
             "greeting, stocks <symbol>, crypto <symbol>."
         )
 
@@ -1513,11 +1516,6 @@ class BBSBotApp:
                     elif "!mp3yt" in clean_line:
                         url = clean_line.split("!mp3yt", 1)[1].strip()
                         self.handle_ytmp3_command(url)
-                    elif "!timer" in clean_line:
-                        parts = clean_line.split("!timer", 1)[1].strip().split()
-                        if len(parts) == 3:
-                            label, value, unit = parts
-                            self.handle_timer_command(label, value, unit, username)
                     elif "!help" in clean_line:
                         self.handle_help_command()
                     elif "!seen" in clean_line:
@@ -1616,6 +1614,9 @@ class BBSBotApp:
             response = self.get_crypto_price(crypto)
         elif "!who" in message:
             response = self.get_who_response()
+        elif "!seen" in message:
+            target_username = message.split("!seen", 1)[1].strip()
+            response = self.get_seen_response(target_username)
         else:
             response = "Unknown command."
 
@@ -2014,30 +2015,6 @@ class BBSBotApp:
 
         self.send_full_message(response_message)
 
-    def handle_timer_command(self, label, value, unit, username):
-        """Set a timer and notify the user when it completes."""
-        try:
-            value = int(value)
-            if unit not in ["second", "seconds", "minute", "minutes"]:
-                raise ValueError("Invalid time unit")
-            
-            duration = value * 60 if "minute" in unit else value
-            timer_id = f"{username}_{label}"
-            self.timers[timer_id] = self.master.after(duration * 1000, self.timer_complete, label, username)
-            response = f"Timer '{label}' set for {value} {unit}."
-        except ValueError as e:
-            response = f"Error setting timer: {str(e)}"
-        
-        self.send_direct_message(username, response)
-
-    def timer_complete(self, label, username):
-        """Notify the user that their timer is complete."""
-        response = f"Timer '{label}' is complete!"
-        self.send_direct_message(username, response)
-        timer_id = f"{username}_{label}"
-        if timer_id in self.timers:
-            del self.timers[timer_id]
-
     def handle_greeting_command(self):
         """Toggle the auto-greeting feature on and off."""
         self.auto_greeting_enabled = not self.auto_greeting_enabled
@@ -2047,17 +2024,20 @@ class BBSBotApp:
 
     def handle_seen_command(self, username):
         """Handle the !seen command to report the last seen timestamp of a user."""
+        response = self.get_seen_response(username)
+        self.send_full_message(response)
+
+    def get_seen_response(self, username):
+        """Return the last seen timestamp of a user."""
         username_lower = username.lower()
         last_seen_lower = {k.lower(): v for k, v in self.last_seen.items()}
 
         if username_lower in last_seen_lower:
             last_seen_time = last_seen_lower[username_lower]
             last_seen_str = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(last_seen_time))
-            response = f"{username} was last seen on {last_seen_str}."
+            return f"{username} was last seen on {last_seen_str}."
         else:
-            response = f"{username} has not been seen in the chatroom."
-
-        self.send_full_message(response)
+            return f"{username} has not been seen in the chatroom."
 
     def save_last_seen(self):
         """Save the last seen dictionary to a file."""
