@@ -681,6 +681,66 @@ class BBSBotApp:
                 query = message.split("!chat", 1)[1].strip()
                 self.handle_chatgpt_command(query, username=username)
                 return
+            elif "!weather" in message:
+                location = message.split("!weather", 1)[1].strip()
+                self.handle_weather_command(location)
+                return
+            elif "!yt" in message:
+                query = message.split("!yt", 1)[1].strip()
+                self.handle_youtube_command(query)
+                return
+            elif "!search" in message:
+                query = message.split("!search", 1)[1].strip()
+                self.handle_web_search_command(query)
+                return
+            elif "!news" in message:
+                topic = message.split("!news", 1)[1].strip()
+                self.handle_news_command(topic)
+                return
+            elif "!map" in message:
+                place = message.split("!map", 1)[1].strip()
+                self.handle_map_command(place)
+                return
+            elif "!pic" in message:
+                query = message.split("!pic", 1)[1].strip()
+                self.handle_pic_command(query)
+                return
+            elif "!polly" in message:
+                parts = message.split("!polly", 1)[1].strip().split(maxsplit=1)
+                if len(parts) == 2:
+                    voice, text = parts
+                    self.handle_polly_command(voice, text)
+                else:
+                    self.send_full_message("Please choose a Polly voice and provide text to convert. The voices are: Matthew, Stephen, Ruth, Joanna, Danielle.")
+                return
+            elif "!mp3yt" in message:
+                url = message.split("!mp3yt", 1)[1].strip()
+                self.handle_ytmp3_command(url)
+                return
+            elif "!timer" in message:
+                parts = message.split("!timer", 1)[1].strip().split()
+                if len(parts) == 3:
+                    label, value, unit = parts
+                    self.handle_timer_command(label, value, unit, username)
+                return
+            elif "!help" in message:
+                self.handle_help_command()
+                return
+            elif "!seen" in message:
+                target_username = message.split("!seen", 1)[1].strip()
+                self.handle_seen_command(target_username)
+                return
+            elif "!greeting" in message:
+                self.handle_greeting_command()
+                return
+            elif "!stocks" in message:
+                symbol = message.split("!stocks", 1)[1].strip()
+                self.handle_stock_command(symbol)
+                return
+            elif "!crypto" in message:
+                crypto = message.split("!crypto", 1)[1].strip()
+                self.handle_crypto_command(crypto)
+                return
 
         # Check for user-specific triggers
         if self.previous_line == ":***" and clean_line.startswith("->"):
@@ -694,59 +754,6 @@ class BBSBotApp:
             self.handle_user_greeting(username)
         elif re.match(r'Topic: \(.*?\)\.\s*(.*?)\s*are here with you\.', clean_line, re.DOTALL):
             self.update_chat_members(clean_line)
-        # Check for trigger commands in public messages
-        elif "!weather" in clean_line:
-            location = clean_line.split("!weather", 1)[1].strip()
-            self.handle_weather_command(location)
-        elif "!yt" in clean_line:
-            query = clean_line.split("!yt", 1)[1].strip()
-            self.handle_youtube_command(query)
-        elif "!search" in clean_line:
-            query = clean_line.split("!search", 1)[1].strip()
-            self.handle_web_search_command(query)
-        elif "!chat" in clean_line:
-            query = clean_line.split("!chat", 1)[1].strip()
-            # Extract the username from the line
-            username_match = re.match(r'From (.+?):', clean_line)
-            username = username_match.group(1) if username_match else "public_chat"
-            self.handle_chatgpt_command(query, username=username)
-        elif "!news" in clean_line:
-            topic = clean_line.split("!news", 1)[1].strip()
-            self.handle_news_command(topic)
-        elif "!map" in clean_line:
-            place = clean_line.split("!map", 1)[1].strip()
-            self.handle_map_command(place)
-        elif "!pic" in clean_line:
-            query = clean_line.split("!pic", 1)[1].strip()
-            self.handle_pic_command(query)
-        elif "!polly" in clean_line:
-            parts = clean_line.split("!polly", 1)[1].strip().split(maxsplit=1)
-            if len(parts) == 2:
-                voice, text = parts
-                self.handle_polly_command(voice, text)
-            else:
-                self.send_full_message("Please choose a Polly voice and provide text to convert. The voices are: Matthew, Stephen, Ruth, Joanna, Danielle.")
-        elif "!mp3yt" in clean_line:
-            url = clean_line.split("!mp3yt", 1)[1].strip()
-            self.handle_ytmp3_command(url)
-        elif "!timer" in clean_line:
-            parts = clean_line.split("!timer", 1)[1].strip().split()
-            if len(parts) == 3:
-                label, value, unit = parts
-                self.handle_timer_command(label, value, unit, username)
-        elif "!help" in clean_line:
-            self.handle_help_command()
-        elif "!seen" in clean_line:
-            target_username = clean_line.split("!seen", 1)[1].strip()
-            self.handle_seen_command(target_username)
-        elif "!greeting" in clean_line:
-            self.handle_greeting_command()
-        elif "!stocks" in clean_line:
-            symbol = clean_line.split("!stocks", 1)[1].strip()
-            self.handle_stock_command(symbol)
-        elif "!crypto" in clean_line:
-            crypto = clean_line.split("!crypto", 1)[1].strip()
-            self.handle_crypto_command(crypto)
 
         # Update the previous line
         self.previous_line = clean_line
@@ -1502,6 +1509,12 @@ class BBSBotApp:
                         self.handle_seen_command(target_username)
                     elif "!greeting" in clean_line:
                         self.handle_greeting_command()
+                    elif "!stocks" in clean_line:
+                        symbol = clean_line.split("!stocks", 1)[1].strip()
+                        self.handle_stock_command(symbol)
+                    elif "!crypto" in clean_line:
+                        crypto = clean_line.split("!crypto", 1)[1].strip()
+                        self.handle_crypto_command(crypto)
 
     def handle_private_trigger(self, username, message):
         """
@@ -2063,16 +2076,26 @@ class BBSBotApp:
     def get_crypto_price(self, crypto):
         """Fetch the current price of a cryptocurrency."""
         api_key = self.coinmarketcap_api_key.get()
-        url = f"https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest?symbol={crypto}"
-        headers = {
-            "X-CMC_PRO_API_KEY": api_key
+        url = 'https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest'
+        parameters = {
+            'symbol': crypto,
+            'convert': 'USD'
         }
+        headers = {
+            'Accepts': 'application/json',
+            'X-CMC_PRO_API_KEY': api_key,
+        }
+        session = requests.Session()
+        session.headers.update(headers)
         try:
-            response = requests.get(url, headers=headers)
+            response = session.get(url, params=parameters)
             data = response.json()
-            price = data["data"][crypto]["quote"]["USD"]["price"]
-            return f"{crypto.upper()}: ${price:.2f}"
-        except Exception as e:
+            if "data" in data and crypto in data["data"]:
+                price = data["data"][crypto]["quote"]["USD"]["price"]
+                return f"{crypto.upper()}: ${price:.2f}"
+            else:
+                return f"Invalid cryptocurrency symbol '{crypto}'. Please use valid symbols like BTC, ETH, DOGE, etc."
+        except (requests.ConnectionError, requests.Timeout, requests.TooManyRedirects) as e:
             return f"Error fetching crypto price: {str(e)}"
 
     def handle_stock_command(self, symbol):
