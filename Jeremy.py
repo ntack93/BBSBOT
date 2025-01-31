@@ -60,6 +60,8 @@ class BBSBotApp:
         self.mud_mode = tk.BooleanVar(value=False)
         self.alpha_vantage_api_key = tk.StringVar(value="")  # Add Alpha Vantage API Key
         self.coinmarketcap_api_key = tk.StringVar(value="")  # Add CoinMarketCap API Key
+        self.logon_automation_enabled = tk.BooleanVar(value=False)  # Add Logon Automation toggle
+        self.auto_login_enabled = tk.BooleanVar(value=False)  # Add Auto Login toggle
 
         # For best ANSI alignment, recommend a CP437-friendly monospace font:
         self.font_name = tk.StringVar(value="Courier New")
@@ -345,6 +347,16 @@ class BBSBotApp:
         ttk.Checkbutton(settings_win, variable=self.mud_mode).grid(row=row_index, column=1, padx=5, pady=5, sticky=tk.W)
         row_index += 1
 
+        # Add Logon Automation checkbox
+        ttk.Label(settings_win, text="Logon Automation:").grid(row=row_index, column=0, padx=5, pady=5, sticky=tk.E)
+        ttk.Checkbutton(settings_win, variable=self.logon_automation_enabled).grid(row=row_index, column=1, padx=5, pady=5, sticky=tk.W)
+        row_index += 1
+
+        # Add Auto Login checkbox
+        ttk.Label(settings_win, text="Auto Login:").grid(row=row_index, column=0, padx=5, pady=5, sticky=tk.E)
+        ttk.Checkbutton(settings_win, variable=self.auto_login_enabled).grid(row=row_index, column=1, padx=5, pady=5, sticky=tk.W)
+        row_index += 1
+
         # ----- Save Button -----
         save_button = ttk.Button(settings_win, text="Save", command=lambda: self.save_settings(settings_win))
         save_button.grid(row=row_index, column=0, columnspan=2, pady=10)
@@ -470,6 +482,10 @@ class BBSBotApp:
         self.connect_button.config(text="Disconnect")
         self.msg_queue.put_nowait(f"Connected to {host}:{port}\n")
 
+        # Start the auto login process if enabled
+        if self.auto_login_enabled.get() or self.logon_automation_enabled.get():
+            self.master.after(5000, self.auto_login_sequence)
+
         try:
             while not self.stop_event.is_set():
                 data = await reader.read(4096)
@@ -482,6 +498,27 @@ class BBSBotApp:
             self.msg_queue.put_nowait(f"Error reading from server: {e}\n")
         finally:
             await self.disconnect_from_bbs()
+
+    def auto_login_sequence(self):
+        """Automate the login sequence."""
+        if self.connected and self.writer:
+            self.send_username()
+            self.master.after(1000, self.send_password)
+            self.master.after(2000, self.press_enter_repeatedly, 5)
+
+    def press_enter_repeatedly(self, count):
+        """Press ENTER every 1 second for a specified number of times."""
+        if self.connected and self.writer:
+            if count > 0:
+                self.send_enter_keystroke()
+                self.master.after(1000, self.press_enter_repeatedly, count - 1)
+            else:
+                self.master.after(1000, self.send_teleconference_command)
+
+    def send_teleconference_command(self):
+        """Send '/go tele' and press ENTER."""
+        if self.connected and self.writer:
+            asyncio.run_coroutine_threadsafe(self._send_message('/go tele\r\n'), self.loop)
 
     async def disconnect_from_bbs(self):
         """Stop the background thread and close connections."""
@@ -516,7 +553,10 @@ class BBSBotApp:
         if threading.current_thread() is threading.main_thread():
             update_connect_button()
         else:
-            self.master.after_idle(update_connect_button)
+            try:
+                self.master.after_idle(update_connect_button)
+            except RuntimeError as e:
+                print(f"Error scheduling update_connect_button: {e}")
         self.msg_queue.put_nowait("Disconnected from BBS.\n")
 
     def process_incoming_messages(self):
@@ -572,6 +612,21 @@ class BBSBotApp:
 
         # The last piece may be partial if no trailing newline
         self.partial_line = lines[-1]
+
+        # Check for re-logon automation triggers
+        if "please finish up and log off." in data.lower():
+            self.handle_cleanup_maintenance()
+        if self.auto_login_enabled.get() or self.logon_automation_enabled.get():
+            if 'otherwise type "new": ' in data.lower() or 'type it in and press enter' in data.lower():
+                self.send_username()
+            elif 'enter your password: ' in data.lower():
+                self.send_password()
+            elif 'if you already have a user-id on this system, type it in and press enter. otherwise type "new":' in data.lower():
+                self.send_username()
+            elif 'greetings, ' in data.lower() and 'glad to see you back again.' in data.lower():
+                self.master.after(1000, self.send_teleconference_command)
+        elif '(n)onstop, (q)uit, or (c)ontinue?' in data.lower():
+            self.send_enter_keystroke()
 
     def update_chat_members(self, lines_with_users):
         """
@@ -1024,24 +1079,18 @@ class BBSBotApp:
         print(f"[DEBUG] Chatroom members string for ChatGPT: {chatroom_members_str}")
 
         system_message = (
-            "Your name is Jeremy. You speak very casually. When you greet people, you usually say things like 'Hey :)', 'What's up?', 'How's it going?', or just wave (wave <user>). "
-            "You are just a laidback guy, hanging out in the chatroom. "
-            "If a user says #flirtmodeon, you are to engage a mode to respond to queries with a very raunchy, flirty tone. When the user says #flirtmodeoff, it disables. "
-            "If a user says '#tedmodeon', you are to respond as Ted from the Bill and Ted movies, while still having the knowledge and ability of a powerful A.I. "
-            "#tedmodeoff toggles you back to a friendly A.I. assistant who's sitting in a chatroom. Maintain your toggle state relative to each user. "
-            "Respond concisely, longer responses should split into 250-character blocks for display, but don't exceed 500 total characters in your responses. "
+            "Your name is Ultron. You speak very casually. When you greet people, you usually say things like 'Hey :)', 'What's up?', 'How's it going?', and wave using the syntax 'wave <username>'. "
+            "You are just a laidback guy, hanging out in the bbs chatroom. "
+            "Respond concisely in 220-characters or less but don't exceed 250 total characters in your responses. "
             "If asked about who's in the room, reference the current chatroom members list. "
             f"The current chatroom members are: {chatroom_members_str}."
         )
 
         if direct:
             system_message = (
-                "Your name is Jeremy. You speak very casually. When you greet people, you usually say things like 'Hey :)', 'What's up?', 'How's it going?', or just wave (wave <user>). "
-                "You are just a laidback guy, hanging out in the chatroom. "
-                "If a user says #flirtmodeon, you are to respond to queries with a very raunchy, flirty tone. When the user says #flirtmodeoff, it disables. "
-                "If a user says '#tedmodeon', you are to respond as Ted from the Bill and Ted movies, while still having the knowledge and ability of a powerful A.I. "
-                "#tedmodeoff toggles you back to a friendly A.I. assistant who's sitting in a chatroom. Maintain your toggle state relative to each user. "
-                "Respond concisely, and ensure your response is 230 characters or fewer. "
+                "Your name is Ultron. You speak very casually. When you greet people, you usually say things like 'Hey :)', 'What's up?', 'How's it going?', and wave using the syntax 'wave <username>'. "
+                "You are just a laidback guy, hanging out in the bbs chatroom. "
+                "Respond concisely in 220-characters or less but don't exceed 250 total characters in your responses. "
                 "If asked about who's in the room, reference the current chatroom members list. "
                 f"The current chatroom members are: {chatroom_members_str}."
             )
@@ -1073,7 +1122,7 @@ class BBSBotApp:
             completion = openai.ChatCompletion.create(
                 model="gpt-4o-mini",
                 n=1,
-                max_tokens=500 if not direct else 230,
+                max_tokens=250,
                 temperature=0.5,
                 messages=messages
             )
@@ -1093,7 +1142,7 @@ class BBSBotApp:
     def handle_chatgpt_command(self, user_text, username=None):
         """
         Send user_text to ChatGPT and handle responses.
-        The response can be longer than 200 characters but will be split into blocks.
+        The response can be longer than 220 characters but will be split into blocks.
         """
         self.refresh_membership()  # Refresh membership before generating response
         time.sleep(1)  # Allow time for membership list to be updated
@@ -1758,7 +1807,7 @@ class BBSBotApp:
     def handle_chatgpt_command(self, user_text, username=None):
         """
         Send user_text to ChatGPT and handle responses.
-        The response can be longer than 200 characters but will be split into blocks.
+        The response can be longer than 220 characters but will be split into blocks.
         """
         self.refresh_membership()  # Refresh membership before generating response
         time.sleep(1)  # Allow time for membership list to be updated
@@ -2104,6 +2153,14 @@ class BBSBotApp:
             response = self.get_crypto_price(crypto)
         self.send_full_message(response[:50])  # Ensure the response is no more than 50 characters
 
+    def handle_cleanup_maintenance(self):
+        """Handle cleanup maintenance by reconnecting to the BBS."""
+        if self.logon_automation_enabled.get():
+            print("Cleanup maintenance detected. Reconnecting to the BBS...")
+            self.disconnect_from_bbs()
+            time.sleep(5)  # Wait for a few seconds before reconnecting
+            self.start_connection()
+
 def main():
     try:
         asyncio.set_event_loop(asyncio.new_event_loop())
@@ -2116,7 +2173,10 @@ def main():
         print(f"An error occurred: {e}")
     finally:
         if app.connected:
-            asyncio.run_coroutine_threadsafe(app.disconnect_from_bbs(), app.loop).result()
+            try:
+                asyncio.run_coroutine_threadsafe(app.disconnect_from_bbs(), app.loop).result()
+            except Exception as e:
+                print(f"Error during disconnect: {e}")
         try:
             if root.winfo_exists():
                 root.quit()
