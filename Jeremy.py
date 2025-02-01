@@ -110,6 +110,8 @@ class BBSBotApp:
         self.user_list_buffer = []  # Buffer to accumulate user list lines
         self.timers = {}  # Dictionary to store active timers
         self.auto_greeting_enabled = False  # Default auto-greeting to off
+        self.pending_messages_table_name = 'PendingMessages'
+        self.create_pending_messages_table()
 
     def create_dynamodb_table(self):
         """Create DynamoDB table if it doesn't exist."""
@@ -132,6 +134,28 @@ class BBSBotApp:
                 }
             )
             self.dynamodb_client.get_waiter('table_exists').wait(TableName=self.table_name)
+
+    def create_pending_messages_table(self):
+        """Create DynamoDB table for pending messages if it doesn't exist."""
+        try:
+            self.dynamodb_client.describe_table(TableName=self.pending_messages_table_name)
+        except self.dynamodb_client.exceptions.ResourceNotFoundException:
+            self.dynamodb_client.create_table(
+                TableName=self.pending_messages_table_name,
+                KeySchema=[
+                    {'AttributeName': 'recipient', 'KeyType': 'HASH'},
+                    {'AttributeName': 'timestamp', 'KeyType': 'RANGE'}
+                ],
+                AttributeDefinitions=[
+                    {'AttributeName': 'recipient', 'AttributeType': 'S'},
+                    {'AttributeName': 'timestamp', 'AttributeType': 'N'}
+                ],
+                ProvisionedThroughput={
+                    'ReadCapacityUnits': 5,
+                    'WriteCapacityUnits': 5
+                }
+            )
+            self.dynamodb_client.get_waiter('table_exists').wait(TableName=self.pending_messages_table_name)
 
     def save_conversation(self, username, message, response):
         """Save conversation to DynamoDB."""
@@ -173,6 +197,37 @@ class BBSBotApp:
                 'response': current_response
             })
         return conversation_history
+
+    def save_pending_message(self, recipient, sender, message):
+        """Save a pending message to DynamoDB."""
+        timestamp = int(time.time())
+        pending_messages_table = dynamodb.Table(self.pending_messages_table_name)
+        pending_messages_table.put_item(
+            Item={
+                'recipient': recipient.lower(),
+                'timestamp': timestamp,
+                'sender': sender,
+                'message': message
+            }
+        )
+
+    def get_pending_messages(self, recipient):
+        """Retrieve pending messages for a recipient from DynamoDB."""
+        pending_messages_table = dynamodb.Table(self.pending_messages_table_name)
+        response = pending_messages_table.query(
+            KeyConditionExpression=boto3.dynamodb.conditions.Key('recipient').eq(recipient.lower())
+        )
+        return response.get('Items', [])
+
+    def delete_pending_message(self, recipient, timestamp):
+        """Delete a pending message from DynamoDB."""
+        pending_messages_table = dynamodb.Table(self.pending_messages_table_name)
+        pending_messages_table.delete_item(
+            Key={
+                'recipient': recipient.lower(),
+                'timestamp': timestamp
+            }
+        )
 
     def build_ui(self):
         """Set up frames, text areas, input boxes, etc."""
@@ -666,6 +721,11 @@ class BBSBotApp:
         if last_user_match:
             usernames.append(last_user_match.group(1))
 
+        # Handle the case where users are listed without email addresses
+        user_without_domain_match = re.findall(r'\b\S+ is here with you\.', combined_clean)
+        for user in user_without_domain_match:
+            usernames.append(user.split()[0])
+
         print(f"[DEBUG] Extracted usernames: {usernames}")  # Debug statement
 
         # Make them a set to avoid duplicates
@@ -680,6 +740,10 @@ class BBSBotApp:
         self.save_last_seen()  # Save updated last seen timestamps to file
 
         print(f"[DEBUG] Updated chat members: {self.chat_members}")
+
+        # Check and send pending messages for new members
+        for new_member_username in usernames:
+            self.check_and_send_pending_messages(new_member_username)
 
     def save_chat_members(self):
         """Save chat members to DynamoDB."""
@@ -709,7 +773,7 @@ class BBSBotApp:
 
     def parse_incoming_triggers(self, line):
         """
-        Check for commands in the given line: !weather, !yt, !search, !chat, !news, !map, !pic, !polly, !mp3yt, !help, !seen, !greeting, !stocks, !crypto, !timer, !gif
+        Check for commands in the given line: !weather, !yt, !search, !chat, !news, !map, !pic, !polly, !mp3yt, !help, !seen, !greeting, !stocks, !crypto, !timer, !gif, !msg
         And now also capture public messages for conversation history.
         """
         # Remove ANSI codes for easier parsing
@@ -817,6 +881,16 @@ class BBSBotApp:
             elif "!gif" in message:
                 query = message.split("!gif", 1)[1].strip()
                 self.handle_gif_command(query)
+                return
+            elif "!msg" in message:
+                parts = message.split("!msg", 1)[1].strip().split(maxsplit=1)
+                if len(parts) == 2:
+                    recipient, message = parts
+                    sender_match = re.match(r'From (.+?):', clean_line)
+                    sender = sender_match.group(1) if sender_match else "unknown"
+                    self.handle_msg_command(recipient, message, sender)
+                else:
+                    self.send_full_message("Please use the syntax '!msg <username> <message>'.")
                 return
 
         # Check for user-specific triggers
@@ -1258,7 +1332,7 @@ class BBSBotApp:
             "Available commands: Please use a ! immediately followed by one of the following keywords (no space): "
             "weather <location>, yt <query>, search <query>, chat <message>, news <topic>, map <place>, pic <query>, "
             "polly <voice> <text>, mp3yt <youtube link>, help, seen <username>, "
-            "greeting, stocks <symbol>, crypto <symbol>, timer <value> <minutes or seconds>, gif <query>."
+            "greeting, stocks <symbol>, crypto <symbol>, timer <value> <minutes or seconds>, gif <query>, msg <username> <message>."
         )
 
     def handle_help_command(self):
@@ -1627,6 +1701,15 @@ class BBSBotApp:
                     elif "!gif" in clean_line:
                         query = clean_line.split("!gif", 1)[1].strip()
                         self.handle_gif_command(query)
+                    elif "!msg" in clean_line:
+                        parts = clean_line.split("!msg", 1)[1].strip().split(maxsplit=1)
+                        if len(parts) == 2:
+                            recipient, message = parts
+                            sender_match = re.match(r'From (.+?):', clean_line)
+                            sender = sender_match.group(1) if sender_match else "unknown"
+                            self.handle_msg_command(recipient, message, sender)
+                        else:
+                            self.send_full_message("Please use the syntax '!msg <username> <message>'.")
 
     def handle_private_trigger(self, username, message):
         """
@@ -2338,6 +2421,21 @@ class BBSBotApp:
         for child in widget.winfo_children():
             self.clone_widget(child, widget_clone)
         return widget_clone
+
+    def handle_msg_command(self, recipient, message, sender):
+        """Handle the !msg command to leave a message for another user."""
+        self.save_pending_message(recipient, sender, message)
+        self.send_full_message(f"Message for {recipient} saved. They will receive it the next time they are seen in the chatroom.")
+
+    def check_and_send_pending_messages(self, username):
+        """Check for and send any pending messages for the given username."""
+        pending_messages = self.get_pending_messages(username)
+        for msg in pending_messages:
+            sender = msg['sender']
+            message = msg['message']
+            timestamp = msg['timestamp']
+            self.send_direct_message(username, f"Message from {sender}: {message}")
+            self.delete_pending_message(username, timestamp)
 
 def main():
     try:
