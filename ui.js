@@ -25,11 +25,9 @@ document.addEventListener('DOMContentLoaded', function() {
     const autoLogin = localStorage.getItem('autoLogin') === 'true';
     document.getElementById('autoLogin').checked = autoLogin;
 
-    // Add event listener for the "Split View" button
-    document.getElementById('splitViewButton').addEventListener('click', splitView);
-
-    // Add event listener for the "Teleconference" button
-    document.getElementById('teleconferenceButton').addEventListener('click', startTeleconference);
+    // Load and set the state of the Giphy API key
+    const giphyApiKey = localStorage.getItem('giphyApiKey') || '';
+    document.getElementById('giphyApiKey').value = giphyApiKey;
 });
 
 // Save settings when the "Save" button is clicked
@@ -47,6 +45,10 @@ document.getElementById('saveSettingsButton').addEventListener('click', function
     // Save the state of the Auto Login checkbox
     const autoLogin = document.getElementById('autoLogin').checked;
     localStorage.setItem('autoLogin', autoLogin);
+
+    // Save the Giphy API key
+    const giphyApiKey = document.getElementById('giphyApiKey').value;
+    localStorage.setItem('giphyApiKey', giphyApiKey);
 });
 
 // ...existing code...

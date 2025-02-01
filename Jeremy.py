@@ -29,6 +29,7 @@ DEFAULT_GOOGLE_PLACES_API_KEY = ""  # Google Places API Key
 DEFAULT_PEXELS_API_KEY = ""  # Pexels API Key
 DEFAULT_ALPHA_VANTAGE_API_KEY = ""  # Alpha Vantage API Key
 DEFAULT_COINMARKETCAP_API_KEY = ""  # CoinMarketCap API Key
+DEFAULT_GIPHY_API_KEY = ""  # Add default Giphy API Key
 
 # Initialize DynamoDB client
 dynamodb = boto3.resource('dynamodb', region_name='us-east-1')
@@ -62,6 +63,7 @@ class BBSBotApp:
         self.coinmarketcap_api_key = tk.StringVar(value="")  # Add CoinMarketCap API Key
         self.logon_automation_enabled = tk.BooleanVar(value=False)  # Add Logon Automation toggle
         self.auto_login_enabled = tk.BooleanVar(value=False)  # Add Auto Login toggle
+        self.giphy_api_key = tk.StringVar(value=DEFAULT_GIPHY_API_KEY)  # Add Giphy API Key
 
         # For best ANSI alignment, recommend a CP437-friendly monospace font:
         self.font_name = tk.StringVar(value="Courier New")
@@ -318,6 +320,11 @@ class BBSBotApp:
         ttk.Entry(settings_win, textvariable=self.coinmarketcap_api_key, width=40).grid(row=row_index, column=1, padx=5, pady=5)
         row_index += 1
 
+        # ----- Giphy API Key -----
+        ttk.Label(settings_win, text="Giphy API Key:").grid(row=row_index, column=0, padx=5, pady=5, sticky=tk.E)
+        ttk.Entry(settings_win, textvariable=self.giphy_api_key, width=40).grid(row=row_index, column=1, padx=5, pady=5)
+        row_index += 1
+
         # ----- Font Name -----
         ttk.Label(settings_win, text="Font Name:").grid(row=row_index, column=0, padx=5, pady=5, sticky=tk.E)
         font_options = ["Courier New", "Px437 IBM VGA8", "Terminus (TTF)", "Consolas", "Lucida Console"]
@@ -381,7 +388,8 @@ class BBSBotApp:
             "google_places_api_key": self.google_places_api_key.get(),
             "pexels_api_key": self.pexels_api_key.get(),
             "alpha_vantage_api_key": self.alpha_vantage_api_key.get(),
-            "coinmarketcap_api_key": self.coinmarketcap_api_key.get()
+            "coinmarketcap_api_key": self.coinmarketcap_api_key.get(),
+            "giphy_api_key": self.giphy_api_key.get()  # Save Giphy API Key
         }
         with open("api_keys.json", "w") as file:
             json.dump(api_keys, file)
@@ -401,6 +409,7 @@ class BBSBotApp:
                 self.pexels_api_key.set(api_keys.get("pexels_api_key", ""))
                 self.alpha_vantage_api_key.set(api_keys.get("alpha_vantage_api_key", ""))
                 self.coinmarketcap_api_key.set(api_keys.get("coinmarketcap_api_key", ""))
+                self.giphy_api_key.set(api_keys.get("giphy_api_key", ""))  # Load Giphy API Key
 
     def update_display_font(self):
         """Update the Text widget's font based on self.font_name and self.font_size."""
@@ -481,10 +490,6 @@ class BBSBotApp:
         self.connected = True
         self.connect_button.config(text="Disconnect")
         self.msg_queue.put_nowait(f"Connected to {host}:{port}\n")
-
-        # Start the auto login process if enabled
-        if self.auto_login_enabled.get() or self.logon_automation_enabled.get():
-            self.master.after(5000, self.auto_login_sequence)
 
         try:
             while not self.stop_event.is_set():
@@ -696,7 +701,7 @@ class BBSBotApp:
 
     def parse_incoming_triggers(self, line):
         """
-        Check for commands in the given line: !weather, !yt, !search, !chat, !news, !map, !pic, !polly, !mp3yt, !help, !seen, !greeting, !stocks, !crypto
+        Check for commands in the given line: !weather, !yt, !search, !chat, !news, !map, !pic, !polly, !mp3yt, !help, !seen, !greeting, !stocks, !crypto, !timer, !gif
         And now also capture public messages for conversation history.
         """
         # Remove ANSI codes for easier parsing
@@ -793,6 +798,18 @@ class BBSBotApp:
                 crypto = message.split("!crypto", 1)[1].strip()
                 self.handle_crypto_command(crypto)
                 return
+            elif "!timer" in message:
+                parts = message.split("!timer", 1)[1].strip().split()
+                if len(parts) == 2:
+                    value, unit = parts
+                    self.handle_timer_command(username, value, unit)
+                else:
+                    self.send_full_message("Please use the syntax '!timer <value> <minutes or seconds>'.")
+                return
+            elif "!gif" in message:
+                query = message.split("!gif", 1)[1].strip()
+                self.handle_gif_command(query)
+                return
 
         # Check for user-specific triggers
         if self.previous_line == ":***" and clean_line.startswith("->"):
@@ -809,6 +826,21 @@ class BBSBotApp:
         elif re.match(r'(.+?)@(.+?) \(.*?\) is now online\.  Total users: \d+\.', clean_line):
             # This line indicates a user logged onto the BBS, not necessarily entered the chatroom
             return
+
+        # Check for re-logon automation triggers
+        if "please finish up and log off." in clean_line.lower():
+            self.handle_cleanup_maintenance()
+        if self.auto_login_enabled.get() or self.logon_automation_enabled.get():
+            if 'otherwise type "new": ' in clean_line.lower() or 'type it in and press enter' in clean_line.lower():
+                self.send_username()
+            elif 'enter your password: ' in clean_line.lower():
+                self.send_password()
+            elif 'if you already have a user-id on this system, type it in and press enter. otherwise type "new":' in clean_line.lower():
+                self.send_username()
+            elif 'greetings, ' in clean_line.lower() and 'glad to see you back again.' in clean_line.lower():
+                self.master.after(1000, self.send_teleconference_command)
+        elif '(n)onstop, (q)uit, or (c)ontinue?' in clean_line.lower():
+            self.send_enter_keystroke()
 
         # Update the previous line
         self.previous_line = clean_line
@@ -851,6 +883,9 @@ class BBSBotApp:
         elif "!crypto" in message:
             crypto = message.split("!crypto", 1)[1].strip()
             response = self.get_crypto_price(crypto)
+        elif "!gif" in message:
+            query = message.split("!gif", 1)[1].strip()
+            response = self.get_gif_response(query)
         else:
             # Assume it's a message for the !chat trigger
             response = self.get_chatgpt_response(message, username=username)
@@ -905,6 +940,9 @@ class BBSBotApp:
         elif "!seen" in message:
             target_username = message.split("!seen", 1)[1].strip()
             response = self.get_seen_response(target_username)
+        elif "!gif" in message:
+            query = message.split("!gif", 1)[1].strip()
+            response = self.get_gif_response(query)
         else:
             response = "Unknown command."
 
@@ -1212,7 +1250,7 @@ class BBSBotApp:
             "Available commands: Please use a ! immediately followed by one of the following keywords (no space): "
             "weather <location>, yt <query>, search <query>, chat <message>, news <topic>, map <place>, pic <query>, "
             "polly <voice> <text>, mp3yt <youtube link>, help, seen <username>, "
-            "greeting, stocks <symbol>, crypto <symbol>."
+            "greeting, stocks <symbol>, crypto <symbol>, timer <value> <minutes or seconds>, gif <query>."
         )
 
     def handle_help_command(self):
@@ -1304,7 +1342,7 @@ class BBSBotApp:
         """
         prefix = "Gos " if self.mud_mode.get() else ""
         lines = message.split('\n')
-        full_message = prefix + '\n'.join(lines)
+        full_message = '\n'.join([prefix + line for line in lines])
         chunks = self.chunk_message(full_message, 250)  # Use the new chunk_message!
 
         for chunk in chunks:
@@ -1578,6 +1616,9 @@ class BBSBotApp:
                     elif "!crypto" in clean_line:
                         crypto = clean_line.split("!crypto", 1)[1].strip()
                         self.handle_crypto_command(crypto)
+                    elif "!gif" in clean_line:
+                        query = clean_line.split("!gif", 1)[1].strip()
+                        self.handle_gif_command(query)
 
     def handle_private_trigger(self, username, message):
         """
@@ -1612,6 +1653,9 @@ class BBSBotApp:
         elif "!crypto" in message:
             crypto = message.split("!crypto", 1)[1].strip()
             response = self.get_crypto_price(crypto)
+        elif "!gif" in message:
+            query = message.split("!gif", 1)[1].strip()
+            response = self.get_gif_response(query)
         else:
             # Assume it's a message for the !chat trigger
             response = self.get_chatgpt_response(message, username=username)
@@ -1666,6 +1710,9 @@ class BBSBotApp:
         elif "!seen" in message:
             target_username = message.split("!seen", 1)[1].strip()
             response = self.get_seen_response(target_username)
+        elif "!gif" in message:
+            query = message.split("!gif", 1)[1].strip()
+            response = self.get_gif_response(query)
         else:
             response = "Unknown command."
 
@@ -1883,12 +1930,12 @@ class BBSBotApp:
     #                           Keep Alive
     ########################################################################
     async def keep_alive(self):
-        """Send an <ENTER> keystroke every 1 minute to keep the connection alive."""
+        """Send an <ENTER> keystroke every 10 seconds to keep the connection alive."""
         while not self.keep_alive_stop_event.is_set():
             if self.connected and self.writer:
                 self.writer.write("\r\n")
                 await self.writer.drain()
-            await asyncio.sleep(60)
+            await asyncio.sleep(10)
 
     def start_keep_alive(self):
         """Start the keep-alive coroutine."""
@@ -2160,6 +2207,56 @@ class BBSBotApp:
             self.disconnect_from_bbs()
             time.sleep(5)  # Wait for a few seconds before reconnecting
             self.start_connection()
+
+    def handle_timer_command(self, username, value, unit):
+        """Handle the !timer command to set a timer for the user."""
+        try:
+            value = int(value)
+            if unit not in ["minutes", "seconds"]:
+                raise ValueError("Invalid unit")
+        except ValueError:
+            self.send_full_message("Invalid timer value or unit. Please use the syntax '!timer <value> <minutes or seconds>'.")
+            return
+
+        duration = value * 60 if unit == "minutes" else value
+        timer_id = f"{username}_{time.time()}"
+
+        def timer_callback():
+            self.send_full_message(f"Timer for {username} has ended.")
+            del self.timers[timer_id]
+
+        self.timers[timer_id] = self.master.after(duration * 1000, timer_callback)
+        self.send_full_message(f"Timer set for {username} for {value} {unit}.")
+
+    def handle_gif_command(self, query):
+        """Fetch a popular GIF based on the query."""
+        key = self.giphy_api_key.get()
+        if not key:
+            response = "Giphy API key is missing."
+        elif not query:
+            response = "Please specify a query."
+        else:
+            url = "https://api.giphy.com/v1/gifs/search"
+            params = {
+                "api_key": key,
+                "q": query,
+                "limit": 1,
+                "rating": "g"
+            }
+            try:
+                r = requests.get(url, params=params, timeout=10)
+                r.raise_for_status()  # Raise an HTTPError for bad responses
+                data = r.json()
+                gifs = data.get("data", [])
+                if not gifs:
+                    response = f"No GIFs found for '{query}'."
+                else:
+                    gif_url = gifs[0].get("url", "No URL")
+                    response = f"GIF for '{query}': {gif_url}"
+            except requests.exceptions.RequestException as e:
+                response = f"Error fetching GIF: {str(e)}"
+
+        self.send_full_message(response)
 
 def main():
     try:
