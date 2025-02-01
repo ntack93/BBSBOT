@@ -28,6 +28,12 @@ document.addEventListener('DOMContentLoaded', function() {
     // Load and set the state of the Giphy API key
     const giphyApiKey = localStorage.getItem('giphyApiKey') || '';
     document.getElementById('giphyApiKey').value = giphyApiKey;
+
+    // Add event listener for the "Split View" button
+    document.getElementById('splitViewButton').addEventListener('click', splitView);
+
+    // Add event listener for the "Teleconference" button
+    document.getElementById('teleconferenceButton').addEventListener('click', startTeleconference);
 });
 
 // Save settings when the "Save" button is clicked
@@ -55,11 +61,15 @@ document.getElementById('saveSettingsButton').addEventListener('click', function
 
 function splitView() {
     // Implement split view logic here
+    const mainContainer = document.getElementById('mainContainer');
+    const clone = mainContainer.cloneNode(true);
+    mainContainer.parentNode.appendChild(clone);
     console.log("Split View button clicked");
 }
 
 function startTeleconference() {
     // Implement teleconference logic here
+    sendMessage('/go tele');
     console.log("Teleconference button clicked");
 }
 

@@ -64,6 +64,8 @@ class BBSBotApp:
         self.logon_automation_enabled = tk.BooleanVar(value=False)  # Add Logon Automation toggle
         self.auto_login_enabled = tk.BooleanVar(value=False)  # Add Auto Login toggle
         self.giphy_api_key = tk.StringVar(value=DEFAULT_GIPHY_API_KEY)  # Add Giphy API Key
+        self.split_view_enabled = False  # Add Split View toggle
+        self.split_view_clones = []  # Track split view clones
 
         # For best ANSI alignment, recommend a CP437-friendly monospace font:
         self.font_name = tk.StringVar(value="Courier New")
@@ -174,7 +176,7 @@ class BBSBotApp:
 
     def build_ui(self):
         """Set up frames, text areas, input boxes, etc."""
-        main_frame = ttk.Frame(self.master)
+        main_frame = ttk.Frame(self.master, name='main_frame')
         main_frame.pack(fill=tk.BOTH, expand=True)
 
         # ----- Config frame -----
@@ -201,6 +203,14 @@ class BBSBotApp:
         # Add a "Mud Mode" checkbox
         mud_mode_check = ttk.Checkbutton(config_frame, text="Mud Mode", variable=self.mud_mode)
         mud_mode_check.grid(row=0, column=7, padx=5, pady=5)
+
+        # Add a "Split View" button
+        split_view_button = ttk.Button(config_frame, text="Split View", command=self.toggle_split_view)
+        split_view_button.grid(row=0, column=8, padx=5, pady=5)
+
+        # Add a "Teleconference" button
+        teleconference_button = ttk.Button(config_frame, text="Teleconference", command=self.send_teleconference_command)
+        teleconference_button.grid(row=0, column=9, padx=5, pady=5)
 
         # ----- Username frame -----
         username_frame = ttk.LabelFrame(main_frame, text="Username")
@@ -534,15 +544,13 @@ class BBSBotApp:
         self.stop_keep_alive()  # Stop keep-alive coroutine
         if self.writer:
             try:
-                if hasattr(self.writer, 'is_closing') and not self.writer.is_closing():
-                    self.writer.close()
-                    await self.writer.drain()  # Ensure all data is sent before closing
+                self.writer.close()
+                await self.writer.wait_closed()  # Ensure the writer is closed properly
             except Exception as e:
                 print(f"Error closing writer: {e}")
         else:
             print("Writer is already None")
 
-        time.sleep(0.1)
         self.connected = False
         self.reader = None
         self.writer = None
@@ -2257,6 +2265,79 @@ class BBSBotApp:
                 response = f"Error fetching GIF: {str(e)}"
 
         self.send_full_message(response)
+
+    def toggle_split_view(self):
+        """Toggle the split view to create multiple bot instances."""
+        if not self.split_view_enabled:
+            self.split_view_enabled = True
+            main_container = self.master.nametowidget('main_frame')
+            main_container.pack_forget()
+
+            split_frame = ttk.Frame(self.master)
+            split_frame.pack(fill=tk.BOTH, expand=True)
+
+            left_frame = ttk.Frame(split_frame)
+            left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+            right_frame = ttk.Frame(split_frame)
+            right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+
+            main_container.pack(in_=left_frame, fill=tk.BOTH, expand=True)
+            clone = self.create_clone(main_container)
+            clone.pack(in_=right_frame, fill=tk.BOTH, expand=True)
+
+            self.split_view_clones.append(clone)
+            print("Split View enabled")
+        else:
+            self.split_view_enabled = False
+            for clone in self.split_view_clones:
+                clone.destroy()
+            self.split_view_clones.clear()
+            main_container = self.master.nametowidget('main_frame')
+            main_container.pack(fill=tk.BOTH, expand=True)
+            print("Split View disabled")
+
+    def create_clone(self, widget):
+        """Create a clone of the given widget."""
+        clone = ttk.Frame(self.master)
+        for child in widget.winfo_children():
+            child_clone = self.clone_widget(child, clone)
+            child_clone.pack()
+        return clone
+
+    def clone_widget(self, widget, parent):
+        """Clone a widget and its configuration."""
+        widget_class = widget.__class__
+        widget_config = {key: val[-1] for key, val in widget.configure().items() if isinstance(val[-1], (str, int, float)) or key in ('text', 'value')}
+        
+        # Handle special cases for configuration values
+        for key, val in widget_config.items():
+            if isinstance(val, str) and val.startswith('-'):
+                widget_config[key] = val[1:]
+            if key in ('borderwidth', 'highlightthickness', 'padx', 'pady'):
+                widget_config[key] = int(val) if val else 0
+            if key == 'font':
+                font_parts = val.split()
+                if len(font_parts) > 1 and font_parts[1].isdigit():
+                    widget_config[key] = (font_parts[0], int(font_parts[1]))
+                else:
+                    widget_config[key] = val
+            if key == 'width' and val == 'borderwidth':
+                widget_config[key] = 1
+
+        # Ensure valid configuration values
+        widget_config = {k: v for k, v in widget_config.items() if v is not None and v != ''}
+
+        # Handle special cases for Text widget
+        if widget_class == tk.Text:
+            widget_clone = widget_class(parent, **widget_config)
+            widget_clone.insert(tk.END, widget.get("1.0", tk.END))
+        else:
+            widget_clone = widget_class(parent, **widget_config)
+
+        for child in widget.winfo_children():
+            self.clone_widget(child, widget_clone)
+        return widget_clone
 
 def main():
     try:
