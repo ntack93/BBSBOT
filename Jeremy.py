@@ -798,12 +798,12 @@ class BBSBotApp:
             self.handle_private_trigger(username, message)
             return
 
-        # Check for page commands
-        page_message_match = re.match(r'(.+?) is paging you from (.+?): (.+)', clean_line)
+        # Check for page commands (both 'from' and 'via')
+        page_message_match = re.match(r'(.+?) is paging you (from|via) (.+?): (.+)', clean_line)
         if page_message_match:
             username = page_message_match.group(1)
-            module_or_channel = page_message_match.group(2)
-            message = page_message_match.group(3)
+            module_or_channel = page_message_match.group(3)
+            message = page_message_match.group(4)
             self.handle_page_trigger(username, module_or_channel, message)
             return
 
@@ -905,7 +905,7 @@ class BBSBotApp:
 
         # Check for user-specific triggers
         if self.previous_line == ":***" and clean_line.startswith("->"):
-            entrance_message = clean_line[3:].strip()
+            entrance_message = clean_line[3:].trip()
             self.handle_user_greeting(entrance_message)
         elif re.match(r'(.+?) just joined this channel!', clean_line):
             username = re.match(r'(.+?) just joined this channel!', clean_line).group(1)
@@ -1825,6 +1825,16 @@ class BBSBotApp:
             return "No users currently in the chatroom."
         else:
             return "Users currently in the chatroom: " + ", ".join(self.chat_members)
+
+    def send_page_response(self, username, module_or_channel, message):
+        """
+        Send a page response to the specified user and module/channel.
+        """
+        chunks = self.chunk_message(message, 250)
+        for chunk in chunks:
+            full_message = f"/P {username} {chunk}"
+            asyncio.run_coroutine_threadsafe(self._send_message(full_message + "\r\n"), self.loop)
+            self.append_terminal_text(full_message + "\n", "normal")
 
     ########################################################################
     #                           Help
