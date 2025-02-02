@@ -16,20 +16,29 @@ from pytube import YouTube
 from pydub import AudioSegment
 import subprocess
 
+# Load API keys from api_keys.json
+def load_api_keys():
+    if os.path.exists("api_keys.json"):
+        with open("api_keys.json", "r") as file:
+            return json.load(file)
+    return {}
+
+api_keys = load_api_keys()
+
 ###############################################################################
 # Default/placeholder API keys (updated in Settings window as needed).
 ###############################################################################
-DEFAULT_OPENAI_API_KEY = ""
-DEFAULT_WEATHER_API_KEY = ""
-DEFAULT_YOUTUBE_API_KEY = ""
-DEFAULT_GOOGLE_CSE_KEY = ""  # Google Custom Search API Key
-DEFAULT_GOOGLE_CSE_CX = ""   # Google Custom Search Engine ID (cx)
-DEFAULT_NEWS_API_KEY = ""    # NewsAPI Key
-DEFAULT_GOOGLE_PLACES_API_KEY = ""  # Google Places API Key
-DEFAULT_PEXELS_API_KEY = ""  # Pexels API Key
-DEFAULT_ALPHA_VANTAGE_API_KEY = ""  # Alpha Vantage API Key
-DEFAULT_COINMARKETCAP_API_KEY = ""  # CoinMarketCap API Key
-DEFAULT_GIPHY_API_KEY = ""  # Add default Giphy API Key
+DEFAULT_OPENAI_API_KEY = api_keys.get("openai_api_key", "")
+DEFAULT_WEATHER_API_KEY = api_keys.get("weather_api_key", "")
+DEFAULT_YOUTUBE_API_KEY = api_keys.get("youtube_api_key", "")
+DEFAULT_GOOGLE_CSE_KEY = api_keys.get("google_cse_api_key", "")  # Google Custom Search API Key
+DEFAULT_GOOGLE_CSE_CX = api_keys.get("google_cse_cx", "")   # Google Custom Search Engine ID (cx)
+DEFAULT_NEWS_API_KEY = api_keys.get("news_api_key", "")    # NewsAPI Key
+DEFAULT_GOOGLE_PLACES_API_KEY = api_keys.get("google_places_api_key", "")  # Google Places API Key
+DEFAULT_PEXELS_API_KEY = api_keys.get("pexels_api_key", "")  # Pexels API Key
+DEFAULT_ALPHA_VANTAGE_API_KEY = api_keys.get("alpha_vantage_api_key", "")  # Alpha Vantage API Key
+DEFAULT_COINMARKETCAP_API_KEY = api_keys.get("coinmarketcap_api_key", "")  # CoinMarketCap API Key
+DEFAULT_GIPHY_API_KEY = api_keys.get("giphy_api_key", "")  # Add default Giphy API Key
 
 # Initialize DynamoDB client
 dynamodb = boto3.resource('dynamodb', region_name='us-east-1')
@@ -471,10 +480,10 @@ class BBSBotApp:
                 self.google_cse_cx.set(api_keys.get("google_cse_cx", ""))
                 self.news_api_key.set(api_keys.get("news_api_key", ""))
                 self.google_places_api_key.set(api_keys.get("google_places_api_key", ""))
-                self.pexels_api_key.set(api_keys.get("pexels_api_key", ""))
-                self.alpha_vantage_api_key.set(api_keys.get("alpha_vantage_api_key", ""))
-                self.coinmarketcap_api_key.set(api_keys.get("coinmarketcap_api_key", ""))
-                self.giphy_api_key.set(api_keys.get("giphy_api_key", ""))  # Load Giphy API Key
+                self.pexels_api_key.set(api_keys.get("pexels_api_key", ""))  # Ensure Pexels API Key is loaded
+                self.alpha_vantage_api_key.set(api_keys.get("alpha_vantage_api_key", ""))  # Ensure Alpha Vantage API Key is loaded
+                self.coinmarketcap_api_key.set(api_keys.get("coinmarketcap_api_key", ""))  # Ensure CoinMarketCap API Key is loaded
+                self.giphy_api_key.set(api_keys.get("giphy_api_key", ""))  # Ensure Giphy API Key is loaded
 
     def update_display_font(self):
         """Update the Text widget's font based on self.font_name and self.font_size."""
@@ -675,7 +684,8 @@ class BBSBotApp:
                 self.previous_line = ":***"
             elif self.previous_line == ":***" and re.match(r'(.+?) just joined this channel!', line.strip()):
                 username = re.match(r'(.+?) just joined this channel!', line.strip()).group(1)
-                self.handle_user_greeting(username)
+                if self.auto_greeting_enabled:
+                    self.handle_user_greeting(username)
                 self.previous_line = ""
 
         # The last piece may be partial if no trailing newline
@@ -1199,7 +1209,7 @@ class BBSBotApp:
         print(f"[DEBUG] Chatroom members string for ChatGPT: {chatroom_members_str}")
 
         system_message = (
-            "Your name is Ultron. You speak very casually. When you greet people, you usually say things like 'Hey :)', 'What's up?', 'How's it going?', and wave using the syntax 'wave <username>'. "
+            "Your name is Ultron. You speak very casually. When you greet people, you usually say things like 'Hey :)', 'What's up?', 'How's it going?'. "
             "You are just a laidback guy, hanging out in the bbs chatroom. "
             "Respond concisely in 220-characters or less but don't exceed 250 total characters in your responses. "
             "If asked about who's in the room, reference the current chatroom members list. "
@@ -1208,7 +1218,7 @@ class BBSBotApp:
 
         if direct:
             system_message = (
-                "Your name is Ultron. You speak very casually. When you greet people, you usually say things like 'Hey :)', 'What's up?', 'How's it going?', and wave using the syntax 'wave <username>'. "
+                "Your name is Ultron. You speak very casually. When you greet people, you usually say things like 'Hey :)', 'What's up?', 'How's it going?'. "
                 "You are just a laidback guy, hanging out in the bbs chatroom. "
                 "Respond concisely in 220-characters or less but don't exceed 250 total characters in your responses. "
                 "If asked about who's in the room, reference the current chatroom members list. "
@@ -2129,9 +2139,15 @@ class BBSBotApp:
 
     def handle_polly_command(self, voice, text):
         """Convert text to speech using AWS Polly and provide an S3 link to the MP3 file."""
-        valid_voices = ["Matthew", "Stephen", "Ruth", "Joanna", "Danielle"]
+        valid_voices = {
+            "Matthew": "standard",
+            "Stephen": "neural",
+            "Ruth": "neural",
+            "Joanna": "neural",
+            "Danielle": "neural"
+        }
         if voice not in valid_voices:
-            response_message = f"Invalid voice. Please choose from: {', '.join(valid_voices)}."
+            response_message = f"Invalid voice. Please choose from: {', '.join(valid_voices.keys())}."
             self.send_full_message(response_message)
             return
 
@@ -2149,7 +2165,8 @@ class BBSBotApp:
             response = polly_client.synthesize_speech(
                 Text=text,
                 OutputFormat='mp3',
-                VoiceId=voice
+                VoiceId=voice,
+                Engine=valid_voices[voice]
             )
             audio_stream = response['AudioStream'].read()
 
