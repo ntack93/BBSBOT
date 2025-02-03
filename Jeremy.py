@@ -2301,7 +2301,10 @@ class BBSBotApp:
         if username_lower in last_seen_lower:
             last_seen_time = last_seen_lower[username_lower]
             last_seen_str = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(last_seen_time))
-            return f"{username} was last seen on {last_seen_str}."
+            time_diff = int(time.time()) - last_seen_time
+            hours, remainder = divmod(time_diff, 3600)
+            minutes, seconds = divmod(remainder, 60)
+            return f"{username} was last seen on {last_seen_str} ({hours} hours, {minutes} minutes, {seconds} seconds ago)."
         else:
             return f"{username} has not been seen in the chatroom."
 
