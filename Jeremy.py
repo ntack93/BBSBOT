@@ -1227,7 +1227,7 @@ class BBSBotApp:
             except Exception as e:
                 return f"Error with Google search: {str(e)}"
 
-    def get_chatgpt_response(self, user_text, direct=False, username=None, fresh_context=False):
+    def get_chatgpt_response(self, user_text, direct=False, username=None):
         """Send user_text to ChatGPT and return the response as a string."""
         key = self.openai_api_key.get()
         if not key:
@@ -1267,16 +1267,23 @@ class BBSBotApp:
                 f"The current chatroom members are: {chatroom_members_str}."
             )
 
+        # Optionally load conversation history from DynamoDB
+        if username:
+            conversation_history = self.get_conversation_history(username)
+        else:
+            conversation_history = self.get_conversation_history("public_chat")
+
         messages = [
             {"role": "system", "content": system_message}
         ]
+        # Then append user messages and assistant replies from the DB ...
+        for item in conversation_history:
+            messages.append({"role": "user", "content": item['message']})
+            messages.append({"role": "assistant", "content": item['response']})
 
-        # Optionally load conversation history from DynamoDB
-        if not fresh_context and username:
-            conversation_history = self.get_conversation_history(username)
-            for item in conversation_history:
-                messages.append({"role": "user", "content": item['message']})
-                messages.append({"role": "assistant", "content": item['response']})
+        # (Optional) add a mini fact about who is speaking:
+        if username:
+            messages.append({"role": "system", "content": f"Reminder: The user speaking is named {username}."})
 
         # Finally append this new user_text
         messages.append({"role": "user", "content": user_text})
@@ -1293,7 +1300,7 @@ class BBSBotApp:
             )
             gpt_response = completion.choices[0].message["content"]
 
-            if username and not fresh_context:
+            if username:
                 self.save_conversation(username, user_text, gpt_response)
             else:
                 self.save_conversation("public_chat", user_text, gpt_response)
@@ -1922,8 +1929,8 @@ class BBSBotApp:
                         "Please relay this weather information to the user in a friendly and natural way."
                     )
 
-                    # Get the response from ChatGPT with a fresh context
-                    chatgpt_response = self.get_chatgpt_response(prompt, fresh_context=True)
+                    # Get the response from ChatGPT
+                    chatgpt_response = self.get_chatgpt_response(prompt)
                     response = chatgpt_response
             except requests.exceptions.RequestException as e:
                 response = f"Error fetching weather: {str(e)}"

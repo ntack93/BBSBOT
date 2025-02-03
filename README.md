@@ -17,9 +17,16 @@ BBS Chat Bot is a Python application that functions as a BBS Teleconference Bot.
 - Use `!pic <query>` to fetch a random picture from Pexels.
 - Use `!stocks <symbol>` to fetch the current price of a stock.
 - Use `!crypto <symbol>` to fetch the current price of a cryptocurrency.
+- Use `!polly <voice> <text>` to convert text to speech using AWS Polly.
+- Use `!mp3yt <youtube link>` to download YouTube videos as MP3.
+- Use `!gif <query>` to fetch a popular GIF.
+- Use `!timer <value> <minutes or seconds>` to set a timer.
+- Use `!msg <username> <message>` to leave a message for another user.
 - Use `/P <username> <message>` to send and receive pages with query responses.
 - **NEW**: Conversation persistence using DynamoDB.
 - **NEW**: Split view to create multiple bot instances. *still in development*
+- **NEW**: Auto-greeting feature to greet users when they join the chatroom.
+- **NEW**: Keep-alive feature to maintain the connection.
 
 ## Requirements
 
@@ -29,13 +36,6 @@ BBS Chat Bot is a Python application that functions as a BBS Teleconference Bot.
 - `boto3` for AWS DynamoDB integration
 
 ## Installation
-
-1. Clone the repository:
-    ```sh
-    git clone https://github.com/yourusername/bbs-chat-bot.git
-    cd bbs-chat-bot
-    ```
-
 2. Install the required Python packages:
     ```sh
     pip install -r requirements.txt
