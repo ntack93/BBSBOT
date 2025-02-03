@@ -248,10 +248,14 @@ class BBSBotApp:
         config_frame.pack(fill=tk.X, padx=5, pady=5)
 
         ttk.Label(config_frame, text="BBS Host:").grid(row=0, column=0, padx=5, pady=5, sticky=tk.E)
-        ttk.Entry(config_frame, textvariable=self.host, width=30).grid(row=0, column=1, padx=5, pady=5, sticky=tk.W)
+        self.host_entry = ttk.Entry(config_frame, textvariable=self.host, width=30)
+        self.host_entry.grid(row=0, column=1, padx=5, pady=5, sticky=tk.W)
+        self.create_context_menu(self.host_entry)
 
         ttk.Label(config_frame, text="Port:").grid(row=0, column=2, padx=5, pady=5, sticky=tk.E)
-        ttk.Entry(config_frame, textvariable=self.port, width=6).grid(row=0, column=3, padx=5, pady=5, sticky=tk.W)
+        self.port_entry = ttk.Entry(config_frame, textvariable=self.port, width=6)
+        self.port_entry.grid(row=0, column=3, padx=5, pady=5, sticky=tk.W)
+        self.create_context_menu(self.port_entry)
 
         self.connect_button = ttk.Button(config_frame, text="Connect", command=self.toggle_connection)
         self.connect_button.grid(row=0, column=4, padx=5, pady=5)
@@ -282,6 +286,7 @@ class BBSBotApp:
 
         self.username_entry = ttk.Entry(username_frame, textvariable=self.username, width=30)
         self.username_entry.pack(side=tk.LEFT, padx=5, pady=5)
+        self.create_context_menu(self.username_entry)
 
         self.remember_username_check = ttk.Checkbutton(username_frame, text="Remember", variable=self.remember_username)
         self.remember_username_check.pack(side=tk.LEFT, padx=5, pady=5)
@@ -295,6 +300,7 @@ class BBSBotApp:
 
         self.password_entry = ttk.Entry(password_frame, textvariable=self.password, width=30, show="*")
         self.password_entry.pack(side=tk.LEFT, padx=5, pady=5)
+        self.create_context_menu(self.password_entry)
 
         self.remember_password_check = ttk.Checkbutton(password_frame, text="Remember", variable=self.remember_password)
         self.remember_password_check.pack(side=tk.LEFT, padx=5, pady=5)
@@ -330,12 +336,26 @@ class BBSBotApp:
         self.input_box = ttk.Entry(input_frame, textvariable=self.input_var, width=80)
         self.input_box.pack(side=tk.LEFT, padx=5, pady=5, fill=tk.X, expand=True)
         self.input_box.bind("<Return>", self.send_message)
+        self.create_context_menu(self.input_box)
 
         self.send_button = ttk.Button(input_frame, text="Send", command=self.send_message)
         self.send_button.pack(side=tk.LEFT, padx=5, pady=5)
 
         # Set initial font
         self.update_display_font()
+
+    def create_context_menu(self, widget):
+        """Create a right-click context menu for the given widget."""
+        menu = tk.Menu(widget, tearoff=0)
+        menu.add_command(label="Cut", command=lambda: widget.event_generate("<<Cut>>"))
+        menu.add_command(label="Copy", command=lambda: widget.event_generate("<<Copy>>"))
+        menu.add_command(label="Paste", command=lambda: widget.event_generate("<<Paste>>"))
+        menu.add_command(label="Select All", command=lambda: widget.event_generate("<<SelectAll>>"))
+
+        def show_context_menu(event):
+            menu.tk_popup(event.x_root, event.y_root)
+
+        widget.bind("<Button-3>", show_context_menu)
 
     def show_settings_window(self):
         """Open a Toplevel with fields for API keys, font settings, etc."""
@@ -346,57 +366,79 @@ class BBSBotApp:
 
         # ----- OpenAI API Key -----
         ttk.Label(settings_win, text="OpenAI API Key:").grid(row=row_index, column=0, padx=5, pady=5, sticky=tk.E)
-        ttk.Entry(settings_win, textvariable=self.openai_api_key, width=40).grid(row=row_index, column=1, padx=5, pady=5)
+        openai_api_key_entry = ttk.Entry(settings_win, textvariable=self.openai_api_key, width=40)
+        openai_api_key_entry.grid(row=row_index, column=1, padx=5, pady=5)
+        self.create_context_menu(openai_api_key_entry)
         row_index += 1
 
         # ----- Weather API Key -----
         ttk.Label(settings_win, text="Weather API Key:").grid(row=row_index, column=0, padx=5, pady=5, sticky=tk.E)
-        ttk.Entry(settings_win, textvariable=self.weather_api_key, width=40).grid(row=row_index, column=1, padx=5, pady=5)
+        weather_api_key_entry = ttk.Entry(settings_win, textvariable=self.weather_api_key, width=40)
+        weather_api_key_entry.grid(row=row_index, column=1, padx=5, pady=5)
+        self.create_context_menu(weather_api_key_entry)
         row_index += 1
 
         # ----- YouTube API Key -----
         ttk.Label(settings_win, text="YouTube API Key:").grid(row=row_index, column=0, padx=5, pady=5, sticky=tk.E)
-        ttk.Entry(settings_win, textvariable=self.youtube_api_key, width=40).grid(row=row_index, column=1, padx=5, pady=5)
+        youtube_api_key_entry = ttk.Entry(settings_win, textvariable=self.youtube_api_key, width=40)
+        youtube_api_key_entry.grid(row=row_index, column=1, padx=5, pady=5)
+        self.create_context_menu(youtube_api_key_entry)
         row_index += 1
 
         # ----- Google CSE Key -----
         ttk.Label(settings_win, text="Google CSE API Key:").grid(row=row_index, column=0, padx=5, pady=5, sticky=tk.E)
-        ttk.Entry(settings_win, textvariable=self.google_cse_api_key, width=40).grid(row=row_index, column=1, padx=5, pady=5)
+        google_cse_api_key_entry = ttk.Entry(settings_win, textvariable=self.google_cse_api_key, width=40)
+        google_cse_api_key_entry.grid(row=row_index, column=1, padx=5, pady=5)
+        self.create_context_menu(google_cse_api_key_entry)
         row_index += 1
 
         # ----- Google CSE ID (cx) -----
         ttk.Label(settings_win, text="Google CSE ID (cx):").grid(row=row_index, column=0, padx=5, pady=5, sticky=tk.E)
-        ttk.Entry(settings_win, textvariable=self.google_cse_cx, width=40).grid(row=row_index, column=1, padx=5, pady=5)
+        google_cse_cx_entry = ttk.Entry(settings_win, textvariable=self.google_cse_cx, width=40)
+        google_cse_cx_entry.grid(row=row_index, column=1, padx=5, pady=5)
+        self.create_context_menu(google_cse_cx_entry)
         row_index += 1
 
         # ----- News API Key -----
         ttk.Label(settings_win, text="News API Key:").grid(row=row_index, column=0, padx=5, pady=5, sticky=tk.E)
-        ttk.Entry(settings_win, textvariable=self.news_api_key, width=40).grid(row=row_index, column=1, padx=5, pady=5)
+        news_api_key_entry = ttk.Entry(settings_win, textvariable=self.news_api_key, width=40)
+        news_api_key_entry.grid(row=row_index, column=1, padx=5, pady=5)
+        self.create_context_menu(news_api_key_entry)
         row_index += 1
 
         # ----- Google Places API Key -----
         ttk.Label(settings_win, text="Google Places API Key:").grid(row=row_index, column=0, padx=5, pady=5, sticky=tk.E)
-        ttk.Entry(settings_win, textvariable=self.google_places_api_key, width=40).grid(row=row_index, column=1, padx=5, pady=5)
+        google_places_api_key_entry = ttk.Entry(settings_win, textvariable=self.google_places_api_key, width=40)
+        google_places_api_key_entry.grid(row=row_index, column=1, padx=5, pady=5)
+        self.create_context_menu(google_places_api_key_entry)
         row_index += 1
 
         # ----- Pexels API Key -----
         ttk.Label(settings_win, text="Pexels API Key:").grid(row=row_index, column=0, padx=5, pady=5, sticky=tk.E)
-        ttk.Entry(settings_win, textvariable=self.pexels_api_key, width=40).grid(row=row_index, column=1, padx=5, pady=5)
+        pexels_api_key_entry = ttk.Entry(settings_win, textvariable=self.pexels_api_key, width=40)
+        pexels_api_key_entry.grid(row=row_index, column=1, padx=5, pady=5)
+        self.create_context_menu(pexels_api_key_entry)
         row_index += 1
 
         # ----- Alpha Vantage API Key -----
         ttk.Label(settings_win, text="Alpha Vantage API Key:").grid(row=row_index, column=0, padx=5, pady=5, sticky=tk.E)
-        ttk.Entry(settings_win, textvariable=self.alpha_vantage_api_key, width=40).grid(row=row_index, column=1, padx=5, pady=5)
+        alpha_vantage_api_key_entry = ttk.Entry(settings_win, textvariable=self.alpha_vantage_api_key, width=40)
+        alpha_vantage_api_key_entry.grid(row=row_index, column=1, padx=5, pady=5)
+        self.create_context_menu(alpha_vantage_api_key_entry)
         row_index += 1
 
         # ----- CoinMarketCap API Key -----
         ttk.Label(settings_win, text="CoinMarketCap API Key:").grid(row=row_index, column=0, padx=5, pady=5, sticky=tk.E)
-        ttk.Entry(settings_win, textvariable=self.coinmarketcap_api_key, width=40).grid(row=row_index, column=1, padx=5, pady=5)
+        coinmarketcap_api_key_entry = ttk.Entry(settings_win, textvariable=self.coinmarketcap_api_key, width=40)
+        coinmarketcap_api_key_entry.grid(row=row_index, column=1, padx=5, pady=5)
+        self.create_context_menu(coinmarketcap_api_key_entry)
         row_index += 1
 
         # ----- Giphy API Key -----
         ttk.Label(settings_win, text="Giphy API Key:").grid(row=row_index, column=0, padx=5, pady=5, sticky=tk.E)
-        ttk.Entry(settings_win, textvariable=self.giphy_api_key, width=40).grid(row=row_index, column=1, padx=5, pady=5)
+        giphy_api_key_entry = ttk.Entry(settings_win, textvariable=self.giphy_api_key, width=40)
+        giphy_api_key_entry.grid(row=row_index, column=1, padx=5, pady=5)
+        self.create_context_menu(giphy_api_key_entry)
         row_index += 1
 
         # ----- Font Name -----
@@ -905,7 +947,7 @@ class BBSBotApp:
 
         # Check for user-specific triggers
         if self.previous_line == ":***" and clean_line.startswith("->"):
-            entrance_message = clean_line[3:].trip()
+            entrance_message = clean_line[3:].strip()
             self.handle_user_greeting(entrance_message)
         elif re.match(r'(.+?) just joined this channel!', clean_line):
             username = re.match(r'(.+?) just joined this channel!', clean_line).group(1)
@@ -1848,7 +1890,7 @@ class BBSBotApp:
     #                           Weather
     ########################################################################
     def handle_weather_command(self, location):
-        """Fetch weather info in Fahrenheit with details (unlimited length)."""
+        """Fetch weather info and relay it to the user using ChatGPT."""
         key = self.weather_api_key.get()
         if not key:
             response = "Weather API key is missing."
@@ -1868,18 +1910,28 @@ class BBSBotApp:
                 if data.get("cod") != 200:
                     response = f"Could not get weather for '{location}'."
                 else:
-                    desc = data["weather"][0]["description"]
-                    temp_f = data["main"]["temp"]
-                    feels_like = data["main"]["feels_like"]
-                    humidity = data["main"]["humidity"]
-                    wind_speed = data["wind"]["speed"]
-                    precipitation = data.get("rain", {}).get("1h", 0) + data.get("snow", {}).get("1h", 0)
+                    weather_info = {
+                        "location": location.title(),
+                        "description": data["weather"][0]["description"],
+                        "temp_f": data["main"]["temp"],
+                        "feels_like": data["main"]["feels_like"],
+                        "humidity": data["main"]["humidity"],
+                        "wind_speed": data["wind"]["speed"],
+                        "precipitation": data.get("rain", {}).get("1h", 0) + data.get("snow", {}).get("1h", 0)
+                    }
 
-                    response = (
-                        f"Weather in {location.title()}: {desc}, {temp_f:.1f}°F "
-                        f"(feels like {feels_like:.1f}°F), Humidity {humidity}%, Wind {wind_speed} mph, "
-                        f"Precipitation {precipitation} mm."
+                    # Prepare the prompt for ChatGPT
+                    prompt = (
+                        f"The weather in {weather_info['location']} is currently described as {weather_info['description']}. "
+                        f"The temperature is {weather_info['temp_f']:.1f}°F, but it feels like {weather_info['feels_like']:.1f}°F. "
+                        f"The humidity is {weather_info['humidity']}%, and the wind speed is {weather_info['wind_speed']} mph. "
+                        f"There is {weather_info['precipitation']} mm of precipitation. "
+                        "Please relay this weather information to the user in a friendly and natural way."
                     )
+
+                    # Get the response from ChatGPT
+                    chatgpt_response = self.get_chatgpt_response(prompt)
+                    response = chatgpt_response
             except requests.exceptions.RequestException as e:
                 response = f"Error fetching weather: {str(e)}"
 

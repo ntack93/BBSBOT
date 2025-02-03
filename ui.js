@@ -34,6 +34,14 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Add event listener for the "Teleconference" button
     document.getElementById('teleconferenceButton').addEventListener('click', startTeleconference);
+
+    // Add context menus to input fields
+    addContextMenu(document.getElementById('hostInput'));
+    addContextMenu(document.getElementById('usernameInput'));
+    addContextMenu(document.getElementById('passwordInput'));
+    addContextMenu(document.getElementById('inputBox'));
+    addContextMenu(document.getElementById('googlePlacesApiKey'));
+    addContextMenu(document.getElementById('giphyApiKey'));
 });
 
 // Save settings when the "Save" button is clicked
@@ -71,6 +79,61 @@ function startTeleconference() {
     // Implement teleconference logic here
     sendMessage('/go tele');
     console.log("Teleconference button clicked");
+}
+
+function addContextMenu(inputElement) {
+    inputElement.addEventListener('contextmenu', function(event) {
+        event.preventDefault();
+        const contextMenu = document.createElement('div');
+        contextMenu.className = 'context-menu';
+        contextMenu.style.position = 'absolute';
+        contextMenu.style.top = `${event.clientY}px`;
+        contextMenu.style.left = `${event.clientX}px`;
+        contextMenu.style.backgroundColor = '#fff';
+        contextMenu.style.border = '1px solid #ccc';
+        contextMenu.style.boxShadow = '0 0 10px rgba(0, 0, 0, 0.1)';
+        contextMenu.style.zIndex = 1000;
+
+        const cutOption = document.createElement('div');
+        cutOption.textContent = 'Cut';
+        cutOption.addEventListener('click', function() {
+            document.execCommand('cut');
+            document.body.removeChild(contextMenu);
+        });
+        contextMenu.appendChild(cutOption);
+
+        const copyOption = document.createElement('div');
+        copyOption.textContent = 'Copy';
+        copyOption.addEventListener('click', function() {
+            document.execCommand('copy');
+            document.body.removeChild(contextMenu);
+        });
+        contextMenu.appendChild(copyOption);
+
+        const pasteOption = document.createElement('div');
+        pasteOption.textContent = 'Paste';
+        pasteOption.addEventListener('click', function() {
+            document.execCommand('paste');
+            document.body.removeChild(contextMenu);
+        });
+        contextMenu.appendChild(pasteOption);
+
+        const selectAllOption = document.createElement('div');
+        selectAllOption.textContent = 'Select All';
+        selectAllOption.addEventListener('click', function() {
+            document.execCommand('selectAll');
+            document.body.removeChild(contextMenu);
+        });
+        contextMenu.appendChild(selectAllOption);
+
+        document.body.appendChild(contextMenu);
+
+        document.addEventListener('click', function() {
+            if (contextMenu) {
+                document.body.removeChild(contextMenu);
+            }
+        }, { once: true });
+    });
 }
 
 // ...existing code...
