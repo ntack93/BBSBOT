@@ -15,6 +15,7 @@ from botocore.exceptions import NoCredentialsError, PartialCredentialsError
 from pytube import YouTube
 from pydub import AudioSegment
 import subprocess
+from openai import OpenAI
 
 # Load API keys from api_keys.json
 def load_api_keys():
@@ -60,7 +61,7 @@ class BBSBotApp:
         self.google_cse_cx = tk.StringVar(value=DEFAULT_GOOGLE_CSE_CX)
         self.news_api_key = tk.StringVar(value=DEFAULT_NEWS_API_KEY)
         self.google_places_api_key = tk.StringVar(value=DEFAULT_GOOGLE_PLACES_API_KEY)
-        self.pexels_api_key = tk.StringVar(value="")  # Add Pexels API Key
+        self.pexels_api_key = tk.StringVar(value=DEFAULT_PEXELS_API_KEY)  # Ensure Pexels API Key is loaded
         self.nickname = tk.StringVar(value=self.load_nickname())
         self.username = tk.StringVar(value=self.load_username())
         self.password = tk.StringVar(value=self.load_password())
@@ -68,13 +69,14 @@ class BBSBotApp:
         self.remember_password = tk.BooleanVar(value=False)
         self.in_teleconference = False  # Flag to track teleconference state
         self.mud_mode = tk.BooleanVar(value=False)
-        self.alpha_vantage_api_key = tk.StringVar(value="")  # Add Alpha Vantage API Key
-        self.coinmarketcap_api_key = tk.StringVar(value="")  # Add CoinMarketCap API Key
+        self.alpha_vantage_api_key = tk.StringVar(value=DEFAULT_ALPHA_VANTAGE_API_KEY)  # Ensure Alpha Vantage API Key is loaded
+        self.coinmarketcap_api_key = tk.StringVar(value=DEFAULT_COINMARKETCAP_API_KEY)  # Ensure CoinMarketCap API Key is loaded
         self.logon_automation_enabled = tk.BooleanVar(value=False)  # Add Logon Automation toggle
         self.auto_login_enabled = tk.BooleanVar(value=False)  # Add Auto Login toggle
         self.giphy_api_key = tk.StringVar(value=DEFAULT_GIPHY_API_KEY)  # Add Giphy API Key
         self.split_view_enabled = False  # Add Split View toggle
         self.split_view_clones = []  # Track split view clones
+        self.no_spam_mode = tk.BooleanVar(value=self.load_no_spam_state())  # Initialize using saved state
 
         # For best ANSI alignment, recommend a CP437-friendly monospace font:
         self.font_name = tk.StringVar(value="Courier New")
@@ -94,6 +96,7 @@ class BBSBotApp:
 
         # A buffer to accumulate partial lines
         self.partial_line = ""
+        self.partial_message = ""  # Buffer to accumulate partial messages
 
         self.favorites = self.load_favorites()  # Load favorite BBS addresses
         self.favorites_window = None  # Track the Favorites window instance
@@ -121,6 +124,7 @@ class BBSBotApp:
         self.auto_greeting_enabled = False  # Default auto-greeting to off
         self.pending_messages_table_name = 'PendingMessages'
         self.create_pending_messages_table()
+        self.openai_client = OpenAI(api_key=self.openai_api_key.get())
 
     def create_dynamodb_table(self):
         """Create DynamoDB table if it doesn't exist."""
@@ -480,6 +484,11 @@ class BBSBotApp:
         ttk.Checkbutton(settings_win, variable=self.auto_login_enabled).grid(row=row_index, column=1, padx=5, pady=5, sticky=tk.W)
         row_index += 1
 
+        # Add No Spam Mode checkbox
+        ttk.Label(settings_win, text="No Spam Mode:").grid(row=row_index, column=0, padx=5, pady=5, sticky=tk.E)
+        ttk.Checkbutton(settings_win, variable=self.no_spam_mode).grid(row=row_index, column=1, padx=5, pady=5, sticky=tk.W)
+        row_index += 1
+
         # ----- Save Button -----
         save_button = ttk.Button(settings_win, text="Save", command=lambda: self.save_settings(settings_win))
         save_button.grid(row=row_index, column=0, columnspan=2, pady=10)
@@ -487,7 +496,7 @@ class BBSBotApp:
     def save_settings(self, window):
         """Called when user clicks 'Save' in the settings window."""
         self.update_display_font()
-        openai.api_key = self.openai_api_key.get()
+        self.openai_client = OpenAI(api_key=self.openai_api_key.get())
         # Save new API keys
         self.save_api_keys()
         window.destroy()
@@ -823,25 +832,42 @@ class BBSBotApp:
             print(f"Error retrieving chat members from DynamoDB: {e}")
             return []
 
-    def parse_incoming_triggers(self, line):
+    
         """
-        Check for commands in the given line: !weather, !yt, !search, !chat, !news, !map, !pic, !polly, !mp3yt, !help, !seen, !greeting, !stocks, !crypto, !timer, !gif, !msg
+        Check for commands in the given line: !weather, !yt, !search, !chat, !news, !map, !pic, !polly, !mp3yt, !help, !seen, !greeting, !stocks, !crypto, !timer, !gif, !msg, !nospam
         And now also capture public messages for conversation history.
         """
         # Remove ANSI codes for easier parsing
         ansi_escape_regex = re.compile(r'\x1b\[(.*?)m')
         clean_line = ansi_escape_regex.sub('', line)
 
+        # Handle !nospam toggle first, so you can always toggle it
+        if "!nospam" in clean_line:
+            self.no_spam_mode.set(not self.no_spam_mode.get())
+            state = "enabled" if self.no_spam_mode.get() else "disabled"
+            self.send_full_message(f"No Spam Mode has been {state}.")
+            return
+
         # Check if the message is private
         private_message_match = re.match(r'From (.+?) \(whispered\): (.+)', clean_line)
+        page_message_match = re.match(r'(.+?) is paging you (from|via) (.+?): (.+)', clean_line)
+        direct_message_match = re.match(r'From (.+?) \(to you\): (.+)', clean_line)
+
+        # Ignore other public messages if no_spam_mode is enabled
+        if self.no_spam_mode.get() and not private_message_match and not page_message_match and not direct_message_match:
+            return
+
+        # Check for private messages
         if private_message_match:
             username = private_message_match.group(1)
             message = private_message_match.group(2)
-            self.handle_private_trigger(username, message)
+            self.partial_message += message + " "
+            if message.endswith("."):
+                self.handle_private_trigger(username, self.partial_message.strip())
+                self.partial_message = ""
             return
 
         # Check for page commands (both 'from' and 'via')
-        page_message_match = re.match(r'(.+?) is paging you (from|via) (.+?): (.+)', clean_line)
         if page_message_match:
             username = page_message_match.group(1)
             module_or_channel = page_message_match.group(3)
@@ -850,100 +876,25 @@ class BBSBotApp:
             return
 
         # Check for direct messages
-        direct_message_match = re.match(r'From (.+?) \(to you\): (.+)', clean_line)
         if direct_message_match:
             username = direct_message_match.group(1)
             message = direct_message_match.group(2)
-            self.handle_direct_message(username, message)
+            self.partial_message += message + " "
+            if message.endswith("."):
+                self.handle_chatgpt_command(self.partial_message.strip(), username=username)
+                self.partial_message = ""
             return
 
-        # Check for public messages
-        public_message_match = re.match(r'From (.+?): (.+)', clean_line)
-        if public_message_match:
-            username = public_message_match.group(1).strip()
-            message = public_message_match.group(2).strip()
-
-            # If the message includes "!chat", let's process it like any other chat trigger
-            if "!chat" in message:
-                query = message.split("!chat", 1)[1].strip()
-                self.handle_chatgpt_command(query, username=username)
+        # Check for public triggers
+        public_trigger_match = re.match(r'From (.+?): (.+)', clean_line)
+        if public_trigger_match:
+            username = public_trigger_match.group(1)
+            message = public_trigger_match.group(2)
+            if self.no_spam_mode.get():
+                self.append_terminal_text(f"Ignored public trigger due to No Spam Mode: {message}\n", "normal")
                 return
-            elif "!weather" in message:
-                location = message.split("!weather", 1)[1].strip()
-                self.handle_weather_command(location)
-                return
-            elif "!yt" in message:
-                query = message.split("!yt", 1)[1].strip()
-                self.handle_youtube_command(query)
-                return
-            elif "!search" in message:
-                query = message.split("!search", 1)[1].strip()
-                self.handle_web_search_command(query)
-                return
-            elif "!news" in message:
-                topic = message.split("!news", 1)[1].strip()
-                self.handle_news_command(topic)
-                return
-            elif "!map" in message:
-                place = message.split("!map", 1)[1].strip()
-                self.handle_map_command(place)
-                return
-            elif "!pic" in message:
-                query = message.split("!pic", 1)[1].strip()
-                self.handle_pic_command(query)
-                return
-            elif "!polly" in message:
-                parts = message.split("!polly", 1)[1].strip().split(maxsplit=1)
-                if len(parts) == 2:
-                    voice, text = parts
-                    self.handle_polly_command(voice, text)
-                else:
-                    self.send_full_message("Please choose a Polly voice and provide text to convert. The voices are: Matthew, Stephen, Ruth, Joanna, Danielle.")
-                return
-            elif "!mp3yt" in message:
-                url = message.split("!mp3yt", 1)[1].strip()
-                self.handle_ytmp3_command(url)
-                return
-            elif "!help" in message:
-                self.handle_help_command()
-                return
-            elif "!seen" in message:
-                target_username = message.split("!seen", 1)[1].strip()
-                self.handle_seen_command(target_username)
-                return
-            elif "!greeting" in message:
-                self.handle_greeting_command()
-                return
-            elif "!stocks" in message:
-                symbol = message.split("!stocks", 1)[1].strip()
-                self.handle_stock_command(symbol)
-                return
-            elif "!crypto" in message:
-                crypto = message.split("!crypto", 1)[1].strip()
-                self.handle_crypto_command(crypto)
-                return
-            elif "!timer" in message:
-                parts = message.split("!timer", 1)[1].strip().split()
-                if len(parts) == 2:
-                    value, unit = parts
-                    self.handle_timer_command(username, value, unit)
-                else:
-                    self.send_full_message("Please use the syntax '!timer <value> <minutes or seconds>'.")
-                return
-            elif "!gif" in message:
-                query = message.split("!gif", 1)[1].strip()
-                self.handle_gif_command(query)
-                return
-            elif "!msg" in message:
-                parts = message.split("!msg", 1)[1].strip().split(maxsplit=1)
-                if len(parts) == 2:
-                    recipient, message = parts
-                    sender_match = re.match(r'From (.+?):', clean_line)
-                    sender = sender_match.group(1) if sender_match else "unknown"
-                    self.handle_msg_command(recipient, message, sender)
-                else:
-                    self.send_full_message("Please use the syntax '!msg <username> <message>'.")
-                return
+            self.handle_public_trigger(username, message)
+            return
 
         # Check for user-specific triggers
         if self.previous_line == ":***" and clean_line.startswith("->"):
@@ -1229,11 +1180,8 @@ class BBSBotApp:
 
     def get_chatgpt_response(self, user_text, direct=False, username=None):
         """Send user_text to ChatGPT and return the response as a string."""
-        key = self.openai_api_key.get()
-        if not key:
-            return "OpenAI API key is missing."
-
-        openai.api_key = key
+        if not self.openai_client:
+            return "OpenAI client is not initialized."
 
         # Fetch the latest chat members from DynamoDB
         self.chat_members = set(self.get_chat_members())
@@ -1273,11 +1221,14 @@ class BBSBotApp:
         else:
             conversation_history = self.get_conversation_history("public_chat")
 
+        # Truncate conversation history to the last 5 messages
+        truncated_history = conversation_history[-5:]
+
         messages = [
             {"role": "system", "content": system_message}
         ]
-        # Then append user messages and assistant replies from the DB ...
-        for item in conversation_history:
+        # Then append user messages and assistant replies from the truncated history
+        for item in truncated_history:
             messages.append({"role": "user", "content": item['message']})
             messages.append({"role": "assistant", "content": item['response']})
 
@@ -1291,14 +1242,14 @@ class BBSBotApp:
         print(f"[DEBUG] Chunks sent to ChatGPT: {messages}")  # Log chunks sent to ChatGPT
 
         try:
-            completion = openai.ChatCompletion.create(
+            completion = self.openai_client.chat.completions.create(
                 model="gpt-4o-mini",
                 n=1,
-                max_tokens=250,
-                temperature=0.5,
+                max_tokens=500,  # Allow for longer responses
+                temperature=0.2,  # Set temperature to 0.2
                 messages=messages
             )
-            gpt_response = completion.choices[0].message["content"]
+            gpt_response = completion.choices[0].message.content
 
             if username:
                 self.save_conversation(username, user_text, gpt_response)
@@ -1384,7 +1335,7 @@ class BBSBotApp:
             "Available commands: Please use a ! immediately followed by one of the following keywords (no space): "
             "weather <location>, yt <query>, search <query>, chat <message>, news <topic>, map <place>, pic <query>, "
             "polly <voice> <text>, mp3yt <youtube link>, help, seen <username>, "
-            "greeting, stocks <symbol>, crypto <symbol>, timer <value> <minutes or seconds>, gif <query>, msg <username> <message>."
+            "greeting, stocks <symbol>, crypto <symbol>, timer <value> <minutes or seconds>, gif <query>, msg <username> <message>, nospam."
         )
 
     def handle_help_command(self):
@@ -1661,107 +1612,118 @@ class BBSBotApp:
     #                           Trigger Parsing
     ########################################################################
     def parse_incoming_triggers(self, line):
-        """
-        Check for commands in the given line: !weather, !yt, !search, !chat, !news, !help
-        """
-        # Remove ANSI codes for easier parsing
+        # Remove ANSI codes for easier parsing 😎
         ansi_escape_regex = re.compile(r'\x1b\[(.*?)m')
         clean_line = ansi_escape_regex.sub('', line)
 
-        # Check if the message is private
+        # Always allow the !nospam command to toggle state
+        if "!nospam" in clean_line:
+            # Toggle and persist the new state
+            self.no_spam_mode.set(not self.no_spam_mode.get())
+            state = "enabled" if self.no_spam_mode.get() else "disabled"
+            self.send_full_message(f"No Spam Mode has been {state}.")
+            self.save_no_spam_state()
+            return
+
+        # Detect message types
         private_message_match = re.match(r'From (.+?) \(whispered\): (.+)', clean_line)
+        page_message_match = re.match(r'(.+?) is paging you from (.+?): (.+)', clean_line)
+        direct_message_match = re.match(r'From (.+?) \(to you\): (.+)', clean_line)
+
+        # If !nospam is ON, only allow whispered and paging messages.
+        if self.no_spam_mode.get() and not (private_message_match or page_message_match):
+            self.append_terminal_text("Ignored trigger due to No Spam Mode.\n", "normal")
+            return
+
+        # Process private messages
         if private_message_match:
             username = private_message_match.group(1)
             message = private_message_match.group(2)
             self.handle_private_trigger(username, message)
         else:
-            # Check for page commands
-            page_message_match = re.match(r'(.+?) is paging you from (.+?): (.+)', clean_line)
+            # Process page commands
             if page_message_match:
                 username = page_message_match.group(1)
                 module_or_channel = page_message_match.group(2)
                 message = page_message_match.group(3)
                 self.handle_page_trigger(username, module_or_channel, message)
+            # Process direct messages (only if !nospam is OFF)
+            elif direct_message_match:
+                username = direct_message_match.group(1)
+                message = direct_message_match.group(2)
+                self.handle_direct_message(username, message)
             else:
-                # Check for direct messages
-                direct_message_match = re.match(r'From (.+?) \(to you\): (.+)', clean_line)
-                if direct_message_match:
-                    username = direct_message_match.group(1)
-                    message = direct_message_match.group(2)
-                    self.handle_direct_message(username, message)
-                else:
-                    # Check for user-specific triggers
-                    if self.previous_line == ":***" and clean_line.startswith("->"):
-                        entrance_message = clean_line[3:].strip()
-                        self.handle_user_greeting(entrance_message)
-                    elif re.match(r'(.+?) just joined this channel!', clean_line):
-                        username = re.match(r'(.+?) just joined this channel!', clean_line).group(1)
-                        self.handle_user_greeting(username)
-                    elif re.match(r'(.+?)@(.+?) just joined this channel!', clean_line):
-                        username = re.match(r'(.+?)@(.+?) just joined this channel!', clean_line).group(1)
-                        self.handle_user_greeting(username)
-                    elif re.match(r'Topic: \(.*?\)\.\s*(.*?)\s*are here with you\.', clean_line, re.DOTALL):
-                        self.update_chat_members(clean_line)
-                    # Check for trigger commands in public messages
-                    elif "!weather" in clean_line:
-                        location = clean_line.split("!weather", 1)[1].strip()
-                        self.handle_weather_command(location)
-                    elif "!yt" in clean_line:
-                        query = clean_line.split("!yt", 1)[1].strip()
-                        self.handle_youtube_command(query)
-                    elif "!search" in clean_line:
-                        query = clean_line.split("!search", 1)[1].strip()
-                        self.handle_web_search_command(query)
-                    elif "!chat" in clean_line:
-                        query = clean_line.split("!chat", 1)[1].strip()
-                        # Extract the username from the line
-                        username_match = re.match(r'From (.+?):', clean_line)
-                        username = username_match.group(1) if username_match else "public_chat"
-                        self.handle_chatgpt_command(query, username=username)
-                    elif "!news" in clean_line:
-                        topic = clean_line.split("!news", 1)[1].strip()
-                        self.handle_news_command(topic)
-                    elif "!map" in clean_line:
-                        place = clean_line.split("!map", 1)[1].strip()
-                        self.handle_map_command(place)
-                    elif "!pic" in clean_line:
-                        query = clean_line.split("!pic", 1)[1].strip()
-                        self.handle_pic_command(query)
-                    elif "!polly" in clean_line:
-                        parts = clean_line.split("!polly", 1)[1].strip().split(maxsplit=1)
-                        if len(parts) == 2:
-                            voice, text = parts
-                            self.handle_polly_command(voice, text)
-                        else:
-                            self.send_full_message("Please choose a Polly voice and provide text to convert. The voices are: Matthew, Stephen, Ruth, Joanna, Danielle.")
-                    elif "!mp3yt" in clean_line:
-                        url = clean_line.split("!mp3yt", 1)[1].strip()
-                        self.handle_ytmp3_command(url)
-                    elif "!help" in clean_line:
-                        self.handle_help_command()
-                    elif "!seen" in clean_line:
-                        target_username = clean_line.split("!seen", 1)[1].strip()
-                        self.handle_seen_command(target_username)
-                    elif "!greeting" in clean_line:
-                        self.handle_greeting_command()
-                    elif "!stocks" in clean_line:
-                        symbol = clean_line.split("!stocks", 1)[1].strip()
-                        self.handle_stock_command(symbol)
-                    elif "!crypto" in clean_line:
-                        crypto = clean_line.split("!crypto", 1)[1].strip()
-                        self.handle_crypto_command(crypto)
-                    elif "!gif" in clean_line:
-                        query = clean_line.split("!gif", 1)[1].strip()
-                        self.handle_gif_command(query)
-                    elif "!msg" in clean_line:
-                        parts = clean_line.split("!msg", 1)[1].strip().split(maxsplit=1)
-                        if len(parts) == 2:
-                            recipient, message = parts
-                            sender_match = re.match(r'From (.+?):', clean_line)
-                            sender = sender_match.group(1) if sender_match else "unknown"
-                            self.handle_msg_command(recipient, message, sender)
-                        else:
-                            self.send_full_message("Please use the syntax '!msg <username> <message>'.")
+                # Process public and other triggers here...
+                if self.previous_line == ":***" and clean_line.startswith("->"):
+                    entrance_message = clean_line[3:].strip()
+                    self.handle_user_greeting(entrance_message)
+                elif re.match(r'(.+?) just joined this channel!', clean_line):
+                    username = re.match(r'(.+?) just joined this channel!', clean_line).group(1)
+                    self.handle_user_greeting(username)
+                elif re.match(r'(.+?)@(.+?) just joined this channel!', clean_line):
+                    username = re.match(r'(.+?)@(.+?) just joined this channel!', clean_line).group(1)
+                    self.handle_user_greeting(username)
+                elif re.match(r'Topic: \(.*?\)\.\s*(.*?)\s*are here with you\.', clean_line, re.DOTALL):
+                    self.update_chat_members(clean_line)
+                # Public trigger commands:
+                elif "!weather" in clean_line:
+                    location = clean_line.split("!weather", 1)[1].strip()
+                    self.handle_weather_command(location)
+                elif "!yt" in clean_line:
+                    query = clean_line.split("!yt", 1)[1].strip()
+                    self.handle_youtube_command(query)
+                elif "!search" in clean_line:
+                    query = clean_line.split("!search", 1)[1].strip()
+                    self.handle_web_search_command(query)
+                elif "!chat" in clean_line:
+                    query = clean_line.split("!chat", 1)[1].strip()
+                    username_match = re.match(r'From (.+?):', clean_line)
+                    username = username_match.group(1) if username_match else "public_chat"
+                    self.handle_chatgpt_command(query, username=username)
+                elif "!news" in clean_line:
+                    topic = clean_line.split("!news", 1)[1].strip()
+                    self.handle_news_command(topic)
+                elif "!map" in clean_line:
+                    place = clean_line.split("!map", 1)[1].strip()
+                    self.handle_map_command(place)
+                elif "!pic" in clean_line:
+                    query = clean_line.split("!pic", 1)[1].strip()
+                    self.handle_pic_command(query)
+                elif "!polly" in clean_line:
+                    parts = clean_line.split("!polly", 1)[1].strip().split(maxsplit=1)
+                    if len(parts) == 2:
+                        voice, text = parts
+                        self.handle_polly_command(voice, text)
+                    else:
+                        self.send_full_message("Please choose a Polly voice and provide text to convert. The voices are: Matthew, Stephen, Ruth, Joanna, Danielle.")
+                elif "!mp3yt" in clean_line:
+                    url = clean_line.split("!mp3yt", 1)[1].strip()
+                    self.handle_ytmp3_command(url)
+                elif "!help" in clean_line:
+                    self.handle_help_command()
+                elif "!seen" in clean_line:
+                    target_username = clean_line.split("!seen", 1)[1].strip()
+                    self.handle_seen_command(target_username)
+                elif "!greeting" in clean_line:
+                    self.handle_greeting_command()
+                elif "!stocks" in clean_line:
+                    symbol = clean_line.split("!stocks", 1)[1].strip()
+                    self.handle_stock_command(symbol)
+                elif "!crypto" in clean_line:
+                    crypto = clean_line.split("!crypto", 1)[1].strip()
+                    self.handle_crypto_command(crypto)
+                elif "!gif" in clean_line:
+                    query = clean_line.split("!gif", 1)[1].strip()
+                    self.handle_gif_command(query)
+                elif "!msg" in clean_line:
+                    parts = clean_line.split("!msg", 1)[1].strip().split(maxsplit=1)
+                    if len(parts) == 2:
+                        recipient, message = parts
+                        sender_match = re.match(r'From (.+?):', clean_line)
+                        sender = sender_match.group(1) if sender_match else "unknown"
+                        self.handle_msg_command(recipient, message, sender)
+                    else:
+                        self.send_full_message("Please use the syntax '!msg <username> <message>'.")
 
     def handle_private_trigger(self, username, message):
         """
@@ -2518,6 +2480,17 @@ class BBSBotApp:
             timestamp = msg['timestamp']
             self.send_direct_message(username, f"Message from {sender}: {message}")
             self.delete_pending_message(username, timestamp)
+
+    def load_no_spam_state(self):
+        if os.path.exists("nospam_state.json"):
+            with open("nospam_state.json", "r") as file:
+                data = json.load(file)
+                return data.get("nospam", False)
+        return False
+
+    def save_no_spam_state(self):
+        with open("nospam_state.json", "w") as file:
+            json.dump({"nospam": self.no_spam_mode.get()}, file)
 
 def main():
     try:
