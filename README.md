@@ -20,13 +20,13 @@ BBS Chat Bot is a Python application that functions as a BBS Teleconference Bot.
 - Use `!polly <voice> <text>` to convert text to speech using AWS Polly.
 - Use `!mp3yt <youtube link>` to download YouTube videos as MP3.
 - Use `!gif <query>` to fetch a popular GIF.
-- Use `!timer <value> <minutes or seconds>` to set a timer.
+- Use `!timer <value> <minutes or seconds>` to set a timer. *still in development*
 - Use `!msg <username> <message>` to leave a message for another user.
-- Use `/P <username> <message>` to send and receive pages with query responses.
 - **NEW**: Conversation persistence using DynamoDB.
 - **NEW**: Split view to create multiple bot instances. *still in development*
 - **NEW**: Auto-greeting feature to greet users when they join the chatroom.
 - **NEW**: Keep-alive feature to maintain the connection.
+- **NEW**: `!nospam` trigger to toggle No Spam Mode on and off.
 
 ## Requirements
 
@@ -164,12 +164,7 @@ To enable conversation persistence using DynamoDB, follow these steps:
     - **Alpha Vantage API Key**: Required for the `!stocks` trigger to fetch stock prices.
     - **CoinMarketCap API Key**: Required for the `!crypto` trigger to fetch cryptocurrency prices.
 
-6. To use the paging feature, send a page using the syntax `/P <username> <message>`. For example:
-    ```sh
-    /P Noah !weather 23518
-    ```
-
-7. To ensure you receive responses to your queries without interruption, turn on unlimited pages by sending:
+6. To ensure you receive responses to your queries without interruption, turn on unlimited pages by sending:
     ```sh
     /P OK
     ```
