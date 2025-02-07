@@ -939,7 +939,7 @@ class BBSBotApp:
         """
         Handle private message triggers and respond privately.
         """
-        response = None  # Initialize response to avoid UnboundLocalError
+        response = "Unknown command."  # Initialize response with a default value
         if "!weather" in message:
             location = message.split("!weather", 1)[1].strip()
             response = self.get_weather_response(location)
@@ -980,8 +980,7 @@ class BBSBotApp:
             # Assume it's a message for the !chat trigger
             response = self.get_chatgpt_response(message, username=username)
 
-        if response:
-            self.send_private_message(username, response)
+        self.send_private_message(username, response)
 
     def send_private_message(self, username, message):
         """
@@ -1034,6 +1033,9 @@ class BBSBotApp:
         elif "!gif" in message:
             query = message.split("!gif", 1)[1].strip()
             response = self.get_gif_response(query)
+        elif "!doc" in message:
+            query = message.split("!doc", 1)[1].strip()
+            self.handle_doc_command(query, username)
         else:
             response = "Unknown command."
 
@@ -1341,7 +1343,7 @@ class BBSBotApp:
             "Available commands: Please use a ! immediately followed by one of the following keywords (no space): "
             "weather <location>, yt <query>, search <query>, chat <message>, news <topic>, map <place>, pic <query>, "
             "polly <voice> <text>, mp3yt <youtube link>, help, seen <username>, "
-            "greeting, stocks <symbol>, crypto <symbol>, timer <value> <minutes or seconds>, gif <query>, msg <username> <message>, nospam, doc <topic> to generate a document."
+            "greeting, stocks <symbol>, crypto <symbol>, timer <value> <minutes or seconds>, gif <query>, msg <username> <message>, nospam."
         )
 
     def handle_help_command(self):
@@ -1733,14 +1735,14 @@ class BBSBotApp:
                 elif "!doc" in clean_line:
                     query = clean_line.split("!doc", 1)[1].strip()
                     username_match = re.match(r'From (.+?):', clean_line)
-                    username = username_match.group(1) if username_match else "unknown"
+                    username = username_match.group(1) if username_match else "public_chat"
                     self.handle_doc_command(query, username)
 
     def handle_private_trigger(self, username, message):
         """
         Handle private message triggers and respond privately.
         """
-        response = None  # Initialize response to avoid UnboundLocalError
+        response = "Unknown command."  # Initialize response with a default value
         if "!weather" in message:
             location = message.split("!weather", 1)[1].strip()
             response = self.get_weather_response(location)
@@ -1781,8 +1783,7 @@ class BBSBotApp:
             # Assume it's a message for the !chat trigger
             response = self.get_chatgpt_response(message, username=username)
 
-        if response:
-            self.send_private_message(username, response)
+        self.send_private_message(username, response)
 
     def send_private_message(self, username, message):
         """
@@ -1835,6 +1836,9 @@ class BBSBotApp:
         elif "!gif" in message:
             query = message.split("!gif", 1)[1].strip()
             response = self.get_gif_response(query)
+        elif "!doc" in message:
+            query = message.split("!doc", 1)[1].strip()
+            self.handle_doc_command(query, username)
         else:
             response = "Unknown command."
 
@@ -2283,7 +2287,7 @@ class BBSBotApp:
             time_diff = int(time.time()) - last_seen_time
             hours, remainder = divmod(time_diff, 3600)
             minutes, seconds = divmod(remainder, 60)
-            return f"{username} was last seen on {last_seen_str} ({hours} hours, {minutes, seconds} seconds ago)."
+            return f"{username} was last seen on {last_seen_str} ({hours} hours, {minutes} minutes, {seconds} seconds ago)."
         else:
             return f"{username} has not been seen in the chatroom."
 
@@ -2510,71 +2514,72 @@ class BBSBotApp:
             json.dump({"nospam": self.no_spam_mode.get()}, file)
 
     def handle_doc_command(self, query, username):
-        """Handle the !doc command to create a document using ChatGPT with no length restrictions."""
+        """Handle the !doc command to create a document using ChatGPT and provide an S3 link to the file."""
         if not query:
             self.send_private_message(username, "Please provide a query for the document.")
             return
 
+        # Prepare the prompt for ChatGPT
+        prompt = f"Please write a detailed, verbose document based on the following query: {query}"
+
         try:
-            # Get unrestricted response from ChatGPT
-            response = self.get_chatgpt_document_response(query)
-            
-            # Save the response to a temporary file
+            # Get the response from ChatGPT
+            response = self.get_chatgpt_document_response(prompt)
+
+            # Save the response to a .txt file
             filename = f"document_{int(time.time())}.txt"
-            with open(filename, 'w', encoding='utf-8') as file:
+            with open(filename, 'w') as file:
                 file.write(response)
 
-            # Upload to S3 with no chunk limitations
-            try:
-                s3_client = boto3.client('s3', region_name='us-east-1')
-                bucket_name = 'bot-files-repo'
-                
-                with open(filename, 'rb') as file:
-                    s3_client.put_object(
-                        Bucket=bucket_name,
-                        Key=filename,
-                        Body=file,
-                        ContentType='text/plain'
-                    )
-                
-                # Generate direct download link
-                s3_url = f"https://{bucket_name}.s3.amazonaws.com/{filename}"
-                
-                # Send a notification without chunking
-                self.send_private_message(username, f"Your document is ready: {s3_url}")
-                
-                # Delete the local file after successful upload
-                os.remove(filename)
-                
-            except Exception as e:
-                self.send_private_message(username, f"Error uploading document: {str(e)}")
-                
+            # Upload the file to S3
+            s3_client = boto3.client('s3', region_name='us-east-1')
+            bucket_name = 'bot-files-repo'
+            object_key = filename
+
+            with open(filename, 'rb') as file:
+                s3_client.put_object(
+                    Bucket=bucket_name,
+                    Key=object_key,
+                    Body=file,
+                    ContentType='text/plain'
+                )
+
+            # Generate the S3 URL
+            s3_url = f"https://{bucket_name}.s3.amazonaws.com/{object_key}"
+            response_message = f"Here is your document: {s3_url}"
+
+            # Delete the local file after uploading
+            os.remove(filename)
+
         except Exception as e:
-            self.send_private_message(username, f"Error generating document: {str(e)}")
+            response_message = f"Error creating document: {str(e)}"
+
+        # Send the download link to the user
+        self.send_private_message(username, response_message)
 
     def get_chatgpt_document_response(self, prompt):
-        """Get unrestricted response from ChatGPT specifically for document generation."""
+        """Send a prompt to ChatGPT and return the full response as a string."""
         if not self.openai_client:
             return "OpenAI client is not initialized."
 
         messages = [
-            {"role": "system", "content": "You are a helpful assistant tasked with creating detailed documents. Provide thorough, verbose, and well-structured responses."},
-            {"role": "user", "content": f"Create a comprehensive document about: {prompt}"}
+            {"role": "system", "content": "You are a writer of detailed, verbose documents."},
+            {"role": "user", "content": prompt}
         ]
 
         try:
             completion = self.openai_client.chat.completions.create(
                 model="gpt-4o-mini",
-                messages=messages,
                 n=1,
-                max_tokens=10000,  # Increased token limit for documents
-                temperature=0.2,
-                presence_penalty=0.6,  # Encourage more diverse content
-                frequency_penalty=0.5  # Reduce repetition
+                max_tokens=10000,  # Allow for longer responses
+                temperature=0.2,  # Set temperature
+                messages=messages
             )
-            return completion.choices[0].message.content
+            gpt_response = completion.choices[0].message.content
         except Exception as e:
-            return f"Error with ChatGPT API: {str(e)}"
+            gpt_response = f"Error with ChatGPT API: {str(e)}"
+
+        return gpt_response
 
 def main():
     try:
