@@ -939,6 +939,7 @@ class BBSBotApp:
         """
         Handle private message triggers and respond privately.
         """
+        response = None  # Initialize response to avoid UnboundLocalError
         if "!weather" in message:
             location = message.split("!weather", 1)[1].strip()
             response = self.get_weather_response(location)
@@ -974,11 +975,13 @@ class BBSBotApp:
         elif "!doc" in message:
             query = message.split("!doc", 1)[1].strip()
             self.handle_doc_command(query, username)
+            return  # Exit early to avoid sending a response twice
         else:
             # Assume it's a message for the !chat trigger
             response = self.get_chatgpt_response(message, username=username)
 
-        self.send_private_message(username, response)
+        if response:
+            self.send_private_message(username, response)
 
     def send_private_message(self, username, message):
         """
@@ -1338,7 +1341,7 @@ class BBSBotApp:
             "Available commands: Please use a ! immediately followed by one of the following keywords (no space): "
             "weather <location>, yt <query>, search <query>, chat <message>, news <topic>, map <place>, pic <query>, "
             "polly <voice> <text>, mp3yt <youtube link>, help, seen <username>, "
-            "greeting, stocks <symbol>, crypto <symbol>, timer <value> <minutes or seconds>, gif <query>, msg <username> <message>, nospam."
+            "greeting, stocks <symbol>, crypto <symbol>, timer <value> <minutes or seconds>, gif <query>, msg <username> <message>, nospam, doc <topic> to generate a document."
         )
 
     def handle_help_command(self):
@@ -1737,6 +1740,7 @@ class BBSBotApp:
         """
         Handle private message triggers and respond privately.
         """
+        response = None  # Initialize response to avoid UnboundLocalError
         if "!weather" in message:
             location = message.split("!weather", 1)[1].strip()
             response = self.get_weather_response(location)
@@ -1772,11 +1776,13 @@ class BBSBotApp:
         elif "!doc" in message:
             query = message.split("!doc", 1)[1].strip()
             self.handle_doc_command(query, username)
+            return  # Exit early to avoid sending a response twice
         else:
             # Assume it's a message for the !chat trigger
             response = self.get_chatgpt_response(message, username=username)
 
-        self.send_private_message(username, response)
+        if response:
+            self.send_private_message(username, response)
 
     def send_private_message(self, username, message):
         """

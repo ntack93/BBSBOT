@@ -27,6 +27,7 @@ BBS Chat Bot is a Python application that functions as a BBS Teleconference Bot.
 - **NEW**: Auto-greeting feature to greet users when they join the chatroom.
 - **NEW**: Keep-alive feature to maintain the connection.
 - **NEW**: `!nospam` trigger to toggle No Spam Mode on and off.
+- **NEW**: `!doc <topic>` to generate a comprehensive document using ChatGPT.
 
 ## Requirements
 
@@ -34,8 +35,20 @@ BBS Chat Bot is a Python application that functions as a BBS Teleconference Bot.
 - Tkinter (usually included with Python)
 - `asyncio` for asynchronous operations
 - `boto3` for AWS DynamoDB integration
+- `requests` for API requests
+- `openai` for ChatGPT integration
+- `pytube` for YouTube video downloads
+- `pydub` for audio processing
+- `subprocess` for running external commands
 
 ## Installation
+
+1. Clone the repository:
+    ```sh
+    git clone https://github.com/yourusername/bbschatbot.git
+    cd bbschatbot
+    ```
+
 2. Install the required Python packages:
     ```sh
     pip install -r requirements.txt
@@ -116,6 +129,12 @@ To use the various `!triggers` in the bot, you need to set up API keys for diffe
 2. Navigate to the API section and generate a new API key.
 3. Copy the API key and enter it in the Settings window under "CoinMarketCap API Key".
 
+### Giphy API Key
+
+1. Sign up for an account at [Giphy](https://developers.giphy.com/).
+2. Navigate to the API section and generate a new API key.
+3. Copy the API key and enter it in the Settings window under "Giphy API Key".
+
 ## DynamoDB Setup
 
 To enable conversation persistence using DynamoDB, follow these steps:
@@ -131,7 +150,12 @@ To enable conversation persistence using DynamoDB, follow these steps:
     - **Table name**: `ChatRoomMembers`
     - **Primary key**:
         - **Partition key**: `room` (Type: String)
-5. Configure your AWS credentials:
+5. Create another table for pending messages with the following settings:
+    - **Table name**: `PendingMessages`
+    - **Primary key**:
+        - **Partition key**: `recipient` (Type: String)
+        - **Sort key**: `timestamp` (Type: Number)
+6. Configure your AWS credentials:
     - Install the AWS CLI: [AWS CLI Installation](https://docs.aws.amazon.com/cli/latest/userguide/install-cliv2.html)
     - Configure the AWS CLI with your credentials:
         ```sh
@@ -163,6 +187,7 @@ To enable conversation persistence using DynamoDB, follow these steps:
     - **Pexels API Key**: Required for the `!pic` trigger to fetch random pictures.
     - **Alpha Vantage API Key**: Required for the `!stocks` trigger to fetch stock prices.
     - **CoinMarketCap API Key**: Required for the `!crypto` trigger to fetch cryptocurrency prices.
+    - **Giphy API Key**: Required for the `!gif` trigger to fetch popular GIFs.
 
 6. To ensure you receive responses to your queries without interruption, turn on unlimited pages by sending:
     ```sh
@@ -171,11 +196,17 @@ To enable conversation persistence using DynamoDB, follow these steps:
 
 ## File Structure
 
-- [jeremy.py](http://_vscodecontentref_/0): Main application script.
-- [ui.html](http://_vscodecontentref_/1): HTML file for the GUI.
-- [ui.js](http://_vscodecontentref_/2): JavaScript file for handling UI interactions.
-- [settings.json](http://_vscodecontentref_/3): VS Code settings for the project.
-- [favorites.json](http://_vscodecontentref_/4): JSON file to store favorite BBS addresses.
+- `jeremy.py`: Main application script.
+- `doctriggerversion.py`: Alternate version of the bot with document generation trigger.
+- `ultron(MacOS).py`: MacOS-specific version of the bot.
+- `README.md`: This README file.
+- `requirements.txt`: List of required Python packages.
+- `api_keys.json`: JSON file to store API keys.
+- `favorites.json`: JSON file to store favorite BBS addresses.
+- `username.json`: JSON file to store the username.
+- `password.json`: JSON file to store the password.
+- `last_seen.json`: JSON file to store the last seen timestamps of users.
+- `nospam_state.json`: JSON file to store the No Spam Mode state.
 
 ## Contributing
 
