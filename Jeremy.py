@@ -125,10 +125,6 @@ class BBSBotApp:
         self.pending_messages_table_name = 'PendingMessages'
         self.create_pending_messages_table()
         self.openai_client = OpenAI(api_key=self.openai_api_key.get())
-        self.trigger_buffer = ""  # Buffer for multi-line triggers
-        self.partial_trigger_text = ""
-        self.partial_trigger_last_update = None
-        self.trigger_timeout_seconds = 5
 
     def create_dynamodb_table(self):
         """Create DynamoDB table if it doesn't exist."""
@@ -701,7 +697,6 @@ class BBSBotApp:
         except queue.Empty:
             pass
         finally:
-            self.flush_partial_trigger_if_timeout()
             self.master.after(100, self.process_incoming_messages)
 
     def process_data_chunk(self, data):
@@ -720,73 +715,47 @@ class BBSBotApp:
 
         # Process all but the last entry; that last might be incomplete
         for line in lines[:-1]:
-            self._process_line(line)
+            self.append_terminal_text(line + "\n", "normal")
+            print(f"Incoming line: {line}")  # Log each incoming line
+            self.parse_incoming_triggers(line)
+
+            # If line contains '@', it might be part of the user list
+            if "@" in line:
+                self.user_list_buffer.append(line)
+
+            # If line ends with "are here with you." or "is here with you.", parse the entire buffer
+            if re.search(r'(is|are) here with you\.$', line.strip()):
+                if line not in self.user_list_buffer:
+                    self.user_list_buffer.append(line)
+                self.update_chat_members(self.user_list_buffer)
+                self.user_list_buffer = []
+
+            # Check for user joining message
+            if line.strip() == ":***":
+                self.previous_line = ":***"
+            elif self.previous_line == ":***" and re.match(r'(.+?) just joined this channel!', line.strip()):
+                username = re.match(r'(.+?) just joined this channel!', line.strip()).group(1)
+                if self.auto_greeting_enabled:
+                    self.handle_user_greeting(username)
+                self.previous_line = ""
 
         # The last piece may be partial if no trailing newline
         self.partial_line = lines[-1]
 
-        # If the remaining partial line looks like it belongs to a trigger,
-        # append it immediately (even without a trailing newline)
-        if self.partial_line and (self.partial_trigger_text or self.partial_line.startswith("!")):
-            self.partial_trigger_last_update = time.time()
-            if self.partial_trigger_text:
-                self.partial_trigger_text += " " + self.partial_line
-            else:
-                self.partial_trigger_text = self.partial_line
-            self.partial_line = ""
-            if self.partial_trigger_text.endswith("()"):
-                complete_trigger = self.partial_trigger_text[:-2].strip()
-                self.process_complete_trigger(complete_trigger)
-                self.partial_trigger_text = ""
-                self.partial_trigger_last_update = None
-
-    def flush_partial_trigger_if_timeout(self):
-        """Flush the partial trigger if the timeout has been exceeded."""
-        if self.partial_trigger_text and self.partial_trigger_last_update:
-            elapsed_time = time.time() - self.partial_trigger_last_update
-            if elapsed_time > self.trigger_timeout_seconds:
-                self.append_terminal_text(f"Flushing incomplete trigger: {self.partial_trigger_text}\n", "normal")
-                self.parse_incoming_triggers(self.partial_trigger_text)
-                self.partial_trigger_text = ""
-                self.partial_trigger_last_update = None
-
-    def process_complete_trigger(self, trigger_text):
-        """
-        Process the complete trigger command after detecting the end marker "()".
-        """
-        # Remove the ending marker "()"
-        if trigger_text.endswith("()"):
-            trigger_text = trigger_text[:-2].strip()
-
-        # Example: handle !doc trigger
-        if trigger_text.startswith("!doc"):
-            query = trigger_text[len("!doc"):].strip()
-            username = "unknown"  # In a full implementation, extract the username from context
-            self.handle_doc_command(query, username)
-        elif trigger_text.startswith("!chat"):
-            query = trigger_text[len("!chat"):].strip()
-            username = "unknown"
-            self.handle_chatgpt_command(query, username=username)
-        # Add additional trigger types as needed
-
-    def _process_line(self, line):
-        """Process a single line of input."""
-        clean_line = line.strip()
-        if clean_line.startswith("!") or "whispered" in clean_line or "paging" in clean_line or self.partial_trigger_text:
-            self.partial_trigger_last_update = time.time()
-            if self.partial_trigger_text:
-                self.partial_trigger_text += " " + clean_line
-            else:
-                self.partial_trigger_text = clean_line
-
-            if self.partial_trigger_text.endswith("()"):
-                complete_trigger = self.partial_trigger_text[:-2].strip()
-                self.process_complete_trigger(complete_trigger)
-                self.partial_trigger_text = ""
-                self.partial_trigger_last_update = None
-        else:
-            self.append_terminal_text(line + "\n", "normal")
-            self.parse_incoming_triggers(line)
+        # Check for re-logon automation triggers
+        if "please finish up and log off." in data.lower():
+            self.handle_cleanup_maintenance()
+        if self.auto_login_enabled.get() or self.logon_automation_enabled.get():
+            if 'otherwise type "new": ' in data.lower() or 'type it in and press enter' in data.lower():
+                self.send_username()
+            elif 'enter your password: ' in data.lower():
+                self.send_password()
+            elif 'if you already have a user-id on this system, type it in and press enter. otherwise type "new":' in data.lower():
+                self.send_username()
+            elif 'greetings, ' in data.lower() and 'glad to see you back again.' in data.lower():
+                self.master.after(1000, self.send_teleconference_command)
+        elif '(n)onstop, (q)uit, or (c)ontinue?' in data.lower():
+            self.send_enter_keystroke()
 
     def update_chat_members(self, lines_with_users):
         """
@@ -958,22 +927,6 @@ class BBSBotApp:
         elif '(n)onstop, (q)uit, or (c)ontinue?' in clean_line.lower():
             self.send_enter_keystroke()
 
-    def send_enter_keystroke(self):
-        # Check for re-logon automation triggers
-        if "please finish up and log off." in clean_line.lower():
-            self.handle_cleanup_maintenance()
-        if self.auto_login_enabled.get() or self.logon_automation_enabled.get():
-            if 'otherwise type "new": ' in clean_line.lower() or 'type it in and press enter' in clean_line.lower():
-                self.send_username()
-            elif 'enter your password: ' in clean_line.lower():
-                self.send_password()
-            elif 'if you already have a user-id on this system, type it in and press enter. otherwise type "new":' in clean_line.lower():
-                self.send_username()
-            elif 'greetings, ' in clean_line.lower() and 'glad to see you back again.' in clean_line.lower():
-                self.master.after(1000, self.send_teleconference_command)
-        elif '(n)onstop, (q)uit, or (c)ontinue?' in clean_line.lower():
-            self.send_enter_keystroke()
-
         # Update the previous line
         self.previous_line = clean_line
 
@@ -1100,24 +1053,43 @@ class BBSBotApp:
             asyncio.run_coroutine_threadsafe(self._send_message(full_message + "\r\n"), self.loop)
             self.append_terminal_text(full_message + "\n", "normal")
 
-    ########################################################################
-    #                           Help
-    ########################################################################
-    def handle_help_command(self):
-        """Provide a list of available commands, adhering to character and chunk limits."""
-        help_message = self.get_help_response()
-        self.send_full_message(help_message)
+    def handle_direct_message(self, username, message):
+        """
+        Handle direct messages and interpret them as !chat queries.
+        """
+        self.refresh_membership()  # Refresh membership before generating response
+        time.sleep(1)  # Allow time for membership list to be updated
+        self.master.update()  # Process any pending updates
 
-    ########################################################################
-    #                           Weather
-    ########################################################################
-    def handle_weather_command(self, location):
-        """Fetch weather info and relay it to the user using ChatGPT."""
+        # Fetch the latest chat members from DynamoDB
+        self.chat_members = set(self.get_chat_members())
+        print(f"[DEBUG] Updated chat members list before generating response: {self.chat_members}")
+
+        if "who's here" in message.lower() or "who is here" in message.lower():
+            query = "who else is in the chat room?"
+            response = self.get_chatgpt_response(query, direct=True, username=username)
+        else:
+            response = self.get_chatgpt_response(message, direct=True, username=username)
+
+        self.send_direct_message(username, response)
+
+    def send_direct_message(self, username, message):
+        """
+        Send a direct message to the specified user.
+        """
+        chunks = self.chunk_message(message, 250)
+        for chunk in chunks:
+            full_message = f">{username} {chunk}"
+            asyncio.run_coroutine_threadsafe(self._send_message(full_message + "\r\n"), self.loop)
+            self.append_terminal_text(full_message + "\n", "normal")
+
+    def get_weather_response(self, location):
+        """Fetch weather info and return the response as a string."""
         key = self.weather_api_key.get()
         if not key:
-            response = "Weather API key is missing."
+            return "Weather API key is missing."
         elif not location:
-            response = "Please specify a city or zip code."
+            return "Please specify a city or zip code."
         else:
             url = "http://api.openweathermap.org/data/2.5/weather"
             params = {
@@ -1130,43 +1102,28 @@ class BBSBotApp:
                 r.raise_for_status()  # Raise an HTTPError for bad responses
                 data = r.json()
                 if data.get("cod") != 200:
-                    response = f"Could not get weather for '{location}'."
+                    return f"Could not get weather for '{location}'."
                 else:
-                    weather_info = {
-                        "location": location.title(),
-                        "description": data["weather"][0]["description"],
-                        "temp_f": data["main"]["temp"],
-                        "feels_like": data["main"]["feels_like"],
-                        "humidity": data["main"]["humidity"],
-                        "wind_speed": data["wind"]["speed"],
-                        "precipitation": data.get("rain", {}).get("1h", 0) + data.get("snow", {}).get("1h", 0)
-                    }
+                    desc = data["weather"][0]["description"]
+                    temp_f = data["main"]["temp"]
+                    feels_like = data["main"]["feels_like"]
+                    humidity = data["main"]["humidity"]
+                    wind_speed = data["wind"]["speed"]
+                    precipitation = data.get("rain", {}).get("1h", 0) + data.get("snow", {}).get("1h", 0)
 
-                    # Prepare the prompt for ChatGPT
-                    prompt = (
-                        f"The weather in {weather_info['location']} is currently described as {weather_info['description']}. "
-                        f"The temperature is {weather_info['temp_f']:.1f}°F, but it feels like {weather_info['feels_like']:.1f}°F. "
-                        f"The humidity is {weather_info['humidity']}%, and the wind speed is {weather_info['wind_speed']} mph. "
-                        f"There is {weather_info['precipitation']} mm of precipitation. "
-                        "Please relay this weather information to the user in a friendly and natural way."
+                    return (
+                        f"Weather in {location.title()}: {desc}, {temp_f:.1f}°F "
+                        f"(feels like {feels_like:.1f}°F), Humidity {humidity}%, Wind {wind_speed} mph, "
+                        f"Precipitation {precipitation} mm."
                     )
-
-                    # Get the response from ChatGPT
-                    chatgpt_response = self.get_chatgpt_response(prompt)
-                    response = chatgpt_response
             except requests.exceptions.RequestException as e:
-                response = f"Error fetching weather: {str(e)}"
+                return f"Error fetching weather: {str(e)}"
 
-        self.send_full_message(response)
-
-    ########################################################################
-    #                           YouTube
-    ########################################################################
-    def handle_youtube_command(self, query):
-        """Perform a YouTube search for the given query (unlimited length)."""
+    def get_youtube_response(self, query):
+        """Perform a YouTube search and return the response as a string."""
         key = self.youtube_api_key.get()
         if not key:
-            response = "YouTube API key is missing."
+            return "YouTube API key is missing."
         else:
             url = "https://www.googleapis.com/youtube/v3/search"
             params = {
@@ -1180,28 +1137,21 @@ class BBSBotApp:
                 data = r.json()
                 items = data.get("items", [])
                 if not items:
-                    response = f"No YouTube results found for '{query}'."
+                    return f"No YouTube results found for '{query}'."
                 else:
                     video_id = items[0]["id"].get("videoId")
                     title = items[0]["snippet"]["title"]
                     url_link = f"https://www.youtube.com/watch?v={video_id}"
-                    response = f"Top YouTube result: {title}\n{url_link}"
+                    return f"Top YouTube result: {title}\n{url_link}"
             except Exception as e:
-                response = f"Error fetching YouTube results: {str(e)}"
+                return f"Error fetching YouTube results: {str(e)}"
 
-        self.send_full_message(response)
-
-    ########################################################################
-    #                           Google Custom Search (with Link)
-    ########################################################################
-    def handle_web_search_command(self, query):
-        """
-        Perform a Google Custom Search (unlimited length) for better link display.
-        """
+    def get_web_search_response(self, query):
+        """Perform a Google Custom Search and return the response as a string."""
         cse_key = self.google_cse_api_key.get()
         cse_id = self.google_cse_cx.get()
         if not cse_key or not cse_id:
-            response = "Google CSE API key or engine ID is missing."
+            return "Google CSE API key or engine ID is missing."
         else:
             url = "https://www.googleapis.com/customsearch/v1"
             params = {
@@ -1215,27 +1165,106 @@ class BBSBotApp:
                 data = r.json()
                 items = data.get("items", [])
                 if not items:
-                    response = f"No Google search results found for '{query}'."
+                    return f"No Google search results found for '{query}'."
                 else:
                     top = items[0]
                     title = top.get("title", "No Title")
                     snippet = top.get("snippet", "")
                     link = top.get("link", "No Link")
 
-                    response = (
+                    return (
                         f"Top Google result for '{query}':\n"
                         f"Title: {title}\n"
                         f"Snippet: {snippet}\n"
                         f"Link: {link}"
                     )
             except Exception as e:
-                response = f"Error with Google search: {str(e)}"
+                return f"Error with Google search: {str(e)}"
 
-        self.send_full_message(response)
+    def get_chatgpt_response(self, user_text, direct=False, username=None):
+        """Send user_text to ChatGPT and return the response as a string."""
+        if not self.openai_client:
+            return "OpenAI client is not initialized."
 
-    ########################################################################
-    #                           ChatGPT
-    ########################################################################
+        # Fetch the latest chat members from DynamoDB
+        self.chat_members = set(self.get_chat_members())
+        members = list(self.chat_members)
+        print(f"[DEBUG] Members list used for ChatGPT response: {members}")
+
+        # Turn user@domain into just the username portion if you want:
+        chatroom_usernames = []
+        for member in members:
+            name_part = member.split('@')[0]
+            chatroom_usernames.append(name_part)
+
+        # Create a simple comma-separated string for the system prompt
+        chatroom_members_str = ", ".join(chatroom_usernames)
+        print(f"[DEBUG] Chatroom members string for ChatGPT: {chatroom_members_str}")
+
+        system_message = (
+            "Your name is Ultron. You speak very casually. When you greet people, you usually say things like 'Hey :)', 'What's up?', 'How's it going?'. "
+            "You are just a laidback guy, hanging out in the bbs chatroom. "
+            "Respond concisely in 220-characters or less but don't exceed 250 total characters in your responses. "
+            "If asked about who's in the room, reference the current chatroom members list. "
+            f"The current chatroom members are: {chatroom_members_str}."
+        )
+
+        if direct:
+            system_message = (
+                "Your name is Ultron. You speak very casually. When you greet people, you usually say things like 'Hey :)', 'What's up?', 'How's it going?'. "
+                "You are just a laidback guy, hanging out in the bbs chatroom. "
+                "Respond concisely in 220-characters or less but don't exceed 250 total characters in your responses. "
+                "If asked about who's in the room, reference the current chatroom members list. "
+                f"The current chatroom members are: {chatroom_members_str}."
+            )
+
+        # Optionally load conversation history from DynamoDB
+        if username:
+            conversation_history = self.get_conversation_history(username)
+        else:
+            conversation_history = self.get_conversation_history("public_chat")
+
+        # Truncate conversation history to the last 5 messages
+        truncated_history = conversation_history[-5:]
+
+        messages = [
+            {"role": "system", "content": system_message}
+        ]
+        # Then append user messages and assistant replies from the truncated history
+        for item in truncated_history:
+            messages.append({"role": "user", "content": item['message']})
+            messages.append({"role": "assistant", "content": item['response']})
+
+        # (Optional) add a mini fact about who is speaking:
+        if username:
+            messages.append({"role": "system", "content": f"Reminder: The user speaking is named {username}."})
+
+        # Finally append this new user_text
+        messages.append({"role": "user", "content": user_text})
+
+        print(f"[DEBUG] Chunks sent to ChatGPT: {messages}")  # Log chunks sent to ChatGPT
+
+        try:
+            completion = self.openai_client.chat.completions.create(
+                model="gpt-4o-mini",
+                n=1,
+                max_tokens=500,  # Allow for longer responses
+                temperature=0.2,  # Set temperature to 0.2
+                messages=messages
+            )
+            gpt_response = completion.choices[0].message.content
+
+            if username:
+                self.save_conversation(username, user_text, gpt_response)
+            else:
+                self.save_conversation("public_chat", user_text, gpt_response)
+
+        except Exception as e:
+            gpt_response = f"Error with ChatGPT API: {str(e)}"
+
+        print(f"[DEBUG] ChatGPT response: {gpt_response}")  # Log ChatGPT response
+        return gpt_response
+
     def handle_chatgpt_command(self, user_text, username=None):
         """
         Send user_text to ChatGPT and handle responses.
@@ -1257,9 +1286,6 @@ class BBSBotApp:
             username = "public_chat"
         self.save_conversation(username, user_text, response)
 
-    ########################################################################
-    #                           News
-    ########################################################################
     def handle_news_command(self, topic):
         """Fetch top 2 news headlines based on the given topic."""
         response = self.get_news_response(topic)
@@ -1267,16 +1293,13 @@ class BBSBotApp:
         for chunk in chunks:
             self.send_full_message(chunk)
 
-    ########################################################################
-    #                           Map
-    ########################################################################
-    def handle_map_command(self, place):
+    def get_map_response(self, place):
         """Fetch place info from Google Places API and return the response as a string."""
         key = self.google_places_api_key.get()
         if not key:
-            response = "Google Places API key is missing."
+            return "Google Places API key is missing."
         elif not place:
-            response = "Please specify a place."
+            return "Please specify a place."
         else:
             url = "https://places.googleapis.com/v1/places:searchText"
             headers = {
@@ -1293,531 +1316,93 @@ class BBSBotApp:
                 data = r.json()
                 places = data.get("places", [])
                 if not places:
-                    response = f"Could not find place '{place}'."
+                    return f"Could not find place '{place}'."
                 else:
                     place_info = places[0]
                     name = place_info.get("displayName", {}).get("text", "No Name")
                     address = place_info.get("formattedAddress", "No Address")
                     types = ", ".join(place_info.get("types", []))
                     website = place_info.get("websiteUri", "No Website")
-                    response = (
+                    return (
                         f"Place: {name}\n"
                         f"Address: {address}\n"
                         f"Types: {types}\n"
                         f"Website: {website}"
                     )
             except requests.exceptions.RequestException as e:
-                response = f"Error fetching place info: {str(e)}"
+                return f"Error fetching place info: {str(e)}"
 
-        self.send_full_message(response)
+    def get_help_response(self):
+        """Return the help message as a string."""
+        return (
+            "Available commands: Please use a ! immediately followed by one of the following keywords (no space): "
+            "weather <location>, yt <query>, search <query>, chat <message>, news <topic>, map <place>, pic <query>, "
+            "polly <voice> <text>, mp3yt <youtube link>, help, seen <username>, "
+            "greeting, stocks <symbol>, crypto <symbol>, timer <value> <minutes or seconds>, gif <query>, msg <username> <message>, nospam."
+        )
 
-    ########################################################################
-    #                           Keep Alive
-    ########################################################################
-    async def keep_alive(self):
-        """Send an <ENTER> keystroke every 10 seconds to keep the connection alive."""
-        while not self.keep_alive_stop_event.is_set():
-            if self.connected and self.writer:
-                self.writer.write("\r\n")
-                await self.writer.drain()
-            await asyncio.sleep(10)
+    def handle_help_command(self):
+        """Provide a list of available commands, adhering to character and chunk limits."""
+        help_message = self.get_help_response()
+        self.send_full_message(help_message)
 
-    def start_keep_alive(self):
-        """Start the keep-alive coroutine."""
-        self.keep_alive_stop_event.clear()
-        if self.loop:
-            self.keep_alive_task = self.loop.create_task(self.keep_alive())
+    def append_terminal_text(self, text, default_tag="normal"):
+        """Append text to the terminal display with ANSI parsing."""
+        self.terminal_display.configure(state=tk.NORMAL)
+        self.parse_ansi_and_insert(text)
+        self.terminal_display.see(tk.END)
+        self.terminal_display.configure(state=tk.DISABLED)
 
-    def stop_keep_alive(self):
-        """Stop the keep-alive coroutine."""
-        self.keep_alive_stop_event.set()
-        if self.keep_alive_task:
-            self.keep_alive_task.cancel()
+    def parse_ansi_and_insert(self, text_data):
+        """Minimal parser for ANSI color codes (foreground only)."""
+        ansi_escape_regex = re.compile(r'\x1b\[(.*?)m')
 
-    def handle_user_greeting(self, username):
-        """
-        Handle user-specific greeting when they enter the chatroom.
-        """
-        if not self.auto_greeting_enabled:
-            return
+        last_end = 0
+        current_tag = "normal"
 
-        self.send_enter_keystroke()  # Send ENTER keystroke to get the list of users
-        time.sleep(1)  # Wait for the response to be processed
-        current_members = self.chat_members.copy()
-        new_member_username = username.split('@')[0]  # Remove the @<bbsaddress> part
-        if new_member_username not in current_members:
-            greeting_message = f"{new_member_username} just came into the chatroom, give them a casual greeting directed at them."
-            response = self.get_chatgpt_response(greeting_message, direct=True, username=new_member_username)
-            self.send_direct_message(new_member_username, response)
+        for match in ansi_escape_regex.finditer(text_data):
+            start, end = match.span()
+            # Insert text before this ANSI code with current tag
+            if start > last_end:
+                self.terminal_display.insert(tk.END, text_data[last_end:start].replace('& # 3 9 ;', "'"), current_tag)
 
-    def handle_pic_command(self, query):
-        """Fetch a random picture from Pexels based on the query."""
-        key = self.pexels_api_key.get()
-        if not key:
-            response = "Pexels API key is missing."
-        elif not query:
-            response = "Please specify a query."
-        else:
-            url = "https://api.pexels.com/v1/search"
-            headers = {
-                "Authorization": key
-            }
-            params = {
-                "query": query,
-                "per_page": 1,
-                "page": 1
-            }
-            try:
-                r = requests.get(url, headers=headers, params=params, timeout=10)
-                r.raise_for_status()  # Raise an HTTPError for bad responses
-                data = r.json()
-                photos = data.get("photos", [])
-                if not photos:
-                    response = f"No pictures found for '{query}'."
-                else:
-                    photo = photos[0]
-                    photographer = photo.get("photographer", "Unknown")
-                    src = photo.get("src", {}).get("original", "No URL")
-                    response = f"Photo by {photographer}: {src}"
-            except requests.exceptions.RequestException as e:
-                response = f"Error fetching picture: {str(e)}"
+            code_string = match.group(1)
+            codes = code_string.split(';')
+            if '0' in codes:
+                current_tag = "normal"
+                codes.remove('0')
 
-        self.send_full_message(response)
+            for c in codes:
+                mapped_tag = self.map_code_to_tag(c)
+                if mapped_tag:
+                    current_tag = mapped_tag
 
-    def refresh_membership(self):
-        """Refresh the membership list by sending an ENTER keystroke and allowing time for processing."""
-        self.send_enter_keystroke()
-        time.sleep(1)         # Allow BBS lines to arrive
-        self.master.update()  # Let process_incoming_messages() parse them
+            last_end = end
 
-    def get_news_response(self, topic):
-        """Fetch top 2 news headlines and return the response as a string."""
-        key = self.news_api_key.get()
-        if not key:
-            return "News API key is missing."
-        else:
-            url = "https://newsapi.org/v2/everything"  # Using "everything" endpoint for broader topic search
-            params = {
-                "q": topic,  # The keyword/topic to search for
-                "apiKey": key,
-                "language": "en",
-                "pageSize": 2  # Fetch top 2 headlines
-            }
-            try:
-                r = requests.get(url, params=params)
-                data = r.json()
-                articles = data.get("articles", [])
-                if not articles:
-                    return f"No news articles found for '{topic}'."
-                else:
-                    response = ""
-                    for i, article in enumerate(articles):
-                        title = article.get("title", "No Title")
-                        description = article.get("description", "No Description")
-                        link = article.get("url", "No URL")
-                        response += f"{i + 1}. {title}\n   {description[:230]}...\n"
-                        response += f"Link: {link}\n\n"
-                    return response.strip()
-            except Exception as e:
-                return f"Error fetching news: {str(e)}"
+        if last_end < len(text_data):
+            self.terminal_display.insert(tk.END, text_data[last_end:].replace('& # 3 9 ;', "'"), current_tag)
 
-    def handle_polly_command(self, voice, text):
-        """Convert text to speech using AWS Polly and provide an S3 link to the MP3 file."""
-        valid_voices = {
-            "Matthew": "standard",
-            "Stephen": "neural",
-            "Ruth": "neural",
-            "Joanna": "neural",
-            "Danielle": "neural"
+    def map_code_to_tag(self, color_code):
+        """Map a numeric color code to a defined Tk text tag."""
+        valid_codes = {
+            '30': 'black',
+            '31': 'red',
+            '32': 'green',
+            '33': 'yellow',
+            '34': 'blue',
+            '35': 'magenta',
+            '36': 'cyan',
+            '37': 'white',
+            '90': 'bright_black',
+            '91': 'bright_red',
+            '92': 'bright_green',
+            '93': 'bright_yellow',
+            '94': 'bright_blue',
+            '95': 'bright_magenta',
+            '96': 'bright_cyan',
+            '97': 'bright_white',
         }
-        if voice not in valid_voices:
-            response_message = f"Invalid voice. Please choose from: {', '.join(valid_voices.keys())}."
-            self.send_full_message(response_message)
-            return
-
-        if len(text) > 200:
-            response_message = "Error: The text for Polly must be 200 characters or fewer."
-            self.send_full_message(response_message)
-            return
-
-        polly_client = boto3.client('polly', region_name='us-east-1')
-        s3_client = boto3.client('s3', region_name='us-east-1')
-        bucket_name = 'bbs-audio-files'
-        object_key = f"polly_output_{int(time.time())}.mp3"
-
-        try:
-            response = polly_client.synthesize_speech(
-                Text=text,
-                OutputFormat='mp3',
-                VoiceId=voice,
-                Engine=valid_voices[voice]
-            )
-            audio_stream = response['AudioStream'].read()
-
-            s3_client.put_object(
-                Bucket=bucket_name,
-                Key=object_key,
-                Body=audio_stream,
-                ContentType='audio/mpeg'
-            )
-
-            s3_url = f"https://{bucket_name}.s3.amazonaws.com/{object_key}"
-            response_message = f"Here is your Polly audio: {s3_url}"
-        except Exception as e:
-            response_message = f"Error with Polly: {str(e)}"
-
-        self.send_full_message(response_message)
-
-    def handle_ytmp3_command(self, url):
-        """Download YouTube video as MP3, upload to S3, and provide the link."""
-        try:
-            # Use yt-dlp to download and convert the YouTube video to MP3
-            result = subprocess.run(
-                ["yt-dlp", "-x", "--audio-format", "mp3", url, "-o", "/tmp/%(id)s.%(ext)s"],
-                capture_output=True,
-                text=True
-            )
-            if result.returncode != 0:
-                raise Exception(result.stderr)
-
-            # Extract the video ID from the URL
-            video_id = url.split("v=")[1].split("&")[0]
-            mp3_filename = f"/tmp/{video_id}.mp3"
-
-            s3_client = boto3.client('s3', region_name='us-east-1')
-            bucket_name = 'bbs-audio-files'
-            object_key = f"ytmp3_{video_id}.mp3"
-
-            with open(mp3_filename, 'rb') as mp3_file:
-                s3_client.put_object(
-                    Bucket=bucket_name,
-                    Key=object_key,
-                    Body=mp3_file,
-                    ContentType='audio/mpeg'
-                )
-
-            s3_url = f"https://{bucket_name}.s3.amazonaws.com/{object_key}"
-            response_message = f"Here is your MP3: {s3_url}"
-        except Exception as e:
-            response_message = f"Error processing YouTube link: {str(e)}"
-
-        self.send_full_message(response_message)
-
-    def handle_greeting_command(self):
-        """Toggle the auto-greeting feature on and off."""
-        self.auto_greeting_enabled = not self.auto_greeting_enabled
-        state = "enabled" if self.auto_greeting_enabled else "disabled"
-        response = f"Auto-greeting has been {state}."
-        self.send_full_message(response)
-
-    def handle_seen_command(self, username):
-        """Handle the !seen command to report the last seen timestamp of a user."""
-        response = self.get_seen_response(username)
-        self.send_full_message(response)
-
-    def get_seen_response(self, username):
-        """Return the last seen timestamp of a user."""
-        username_lower = username.lower()
-        last_seen_lower = {k.lower(): v for k, v in self.last_seen.items()}
-
-        if username_lower in last_seen_lower:
-            last_seen_time = last_seen_lower[username_lower]
-            last_seen_str = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(last_seen_time))
-            time_diff = int(time.time()) - last_seen_time
-            hours, remainder = divmod(time_diff, 3600)
-            minutes, seconds = divmod(remainder, 60)
-            return f"{username} was last seen on {last_seen_str} ({hours} hours, {minutes, seconds} seconds ago)."
-        else:
-            return f"{username} has not been seen in the chatroom."
-
-    def save_last_seen(self):
-        """Save the last seen dictionary to a file."""
-        with open("last_seen.json", "w") as file:
-            json.dump(self.last_seen, file)
-
-    def load_last_seen(self):
-        """Load the last seen dictionary from a file."""
-        if os.path.exists("last_seen.json"):
-            with open("last_seen.json", "r") as file:
-                return json.load(file)
-        return {}
-
-    def get_stock_price(self, symbol):
-        """Fetch the current price of a stock."""
-        api_key = self.alpha_vantage_api_key.get()
-        url = f"https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol={symbol}&apikey={api_key}"
-        try:
-            response = requests.get(url)
-            data = response.json()
-            price = data["Global Quote"]["05. price"]
-            return f"{symbol.upper()}: ${price}"
-        except Exception as e:
-            return f"Error fetching stock price: {str(e)}"
-
-    def get_crypto_price(self, crypto):
-        """Fetch the current price of a cryptocurrency."""
-        api_key = self.coinmarketcap_api_key.get()
-        url = 'https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest'
-        parameters = {
-            'symbol': crypto,
-            'convert': 'USD'
-        }
-        headers = {
-            'Accepts': 'application/json',
-            'X-CMC_PRO_API_KEY': api_key,
-        }
-        session = requests.Session()
-        session.headers.update(headers)
-        try:
-            response = session.get(url, params=parameters)
-            data = response.json()
-            if "data" in data and crypto in data["data"]:
-                price = data["data"][crypto]["quote"]["USD"]["price"]
-                return f"{crypto.upper()}: ${price:.2f}"
-            else:
-                return f"Invalid cryptocurrency symbol '{crypto}'. Please use valid symbols like BTC, ETH, DOGE, etc."
-        except (requests.ConnectionError, requests.Timeout, requests.TooManyRedirects) as e:
-            return f"Error fetching crypto price: {str(e)}"
-
-    def handle_stock_command(self, symbol):
-        """Handle the !stocks command to show the current price of a stock."""
-        if not self.alpha_vantage_api_key.get():
-            response = "Alpha Vantage API key is missing."
-        else:
-            response = self.get_stock_price(symbol)
-        self.send_full_message(response[:50])  # Ensure the response is no more than 50 characters
-
-    def handle_crypto_command(self, crypto):
-        """Handle the !crypto command to show the current price of a cryptocurrency."""
-        if not self.coinmarketcap_api_key.get():
-            response = "CoinMarketCap API key is missing."
-        else:
-            response = self.get_crypto_price(crypto)
-        self.send_full_message(response[:50])  # Ensure the response is no more than 50 characters
-
-    def handle_cleanup_maintenance(self):
-        """Handle cleanup maintenance by reconnecting to the BBS."""
-        if self.logon_automation_enabled.get():
-            print("Cleanup maintenance detected. Reconnecting to the BBS...")
-            self.disconnect_from_bbs()
-            time.sleep(5)  # Wait for a few seconds before reconnecting
-            self.start_connection()
-
-    def handle_timer_command(self, username, value, unit):
-        """Handle the !timer command to set a timer for the user."""
-        try:
-            value = int(value)
-            if unit not in ["minutes", "seconds"]:
-                raise ValueError("Invalid unit")
-        except ValueError:
-            self.send_full_message("Invalid timer value or unit. Please use the syntax '!timer <value> <minutes or seconds>'.")
-            return
-
-        duration = value * 60 if unit == "minutes" else value
-        timer_id = f"{username}_{time.time()}"
-
-        def timer_callback():
-            self.send_full_message(f"Timer for {username} has ended.")
-            del self.timers[timer_id]
-
-        self.timers[timer_id] = self.master.after(duration * 1000, timer_callback)
-        self.send_full_message(f"Timer set for {username} for {value} {unit}.")
-
-    def handle_gif_command(self, query):
-        """Fetch a popular GIF based on the query."""
-        key = self.giphy_api_key.get()
-        if not key:
-            response = "Giphy API key is missing."
-        elif not query:
-            response = "Please specify a query."
-        else:
-            url = "https://api.giphy.com/v1/gifs/search"
-            params = {
-                "api_key": key,
-                "q": query,
-                "limit": 1,
-                "rating": "g"
-            }
-            try:
-                r = requests.get(url, params=params, timeout=10)
-                r.raise_for_status()  # Raise an HTTPError for bad responses
-                data = r.json()
-                gifs = data.get("data", [])
-                if not gifs:
-                    response = f"No GIFs found for '{query}'."
-                else:
-                    gif_url = gifs[0].get("url", "No URL")
-                    response = f"GIF for '{query}': {gif_url}"
-            except requests.exceptions.RequestException as e:
-                response = f"Error fetching GIF: {str(e)}"
-
-        self.send_full_message(response)
-
-    def toggle_split_view(self):
-        """Toggle the split view to create multiple bot instances."""
-        if not self.split_view_enabled:
-            self.split_view_enabled = True
-            main_container = self.master.nametowidget('main_frame')
-            main_container.pack_forget()
-
-            split_frame = ttk.Frame(self.master)
-            split_frame.pack(fill=tk.BOTH, expand=True)
-
-            left_frame = ttk.Frame(split_frame)
-            left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-
-            right_frame = ttk.Frame(split_frame)
-            right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
-
-            main_container.pack(in_=left_frame, fill=tk.BOTH, expand=True)
-            clone = self.create_clone(main_container)
-            clone.pack(in_=right_frame, fill=tk.BOTH, expand=True)
-
-            self.split_view_clones.append(clone)
-            print("Split View enabled")
-        else:
-            self.split_view_enabled = False
-            for clone in self.split_view_clones:
-                clone.destroy()
-            self.split_view_clones.clear()
-            main_container = self.master.nametowidget('main_frame')
-            main_container.pack(fill=tk.BOTH, expand=True)
-            print("Split View disabled")
-
-    def create_clone(self, widget):
-        """Create a clone of the given widget."""
-        clone = ttk.Frame(self.master)
-        for child in widget.winfo_children():
-            child_clone = self.clone_widget(child, clone)
-            child_clone.pack()
-        return clone
-
-    def clone_widget(self, widget, parent):
-        """Clone a widget and its configuration."""
-        widget_class = widget.__class__
-        widget_config = {key: val[-1] for key, val in widget.configure().items() if isinstance(val[-1], (str, int, float)) or key in ('text', 'value')}
-        
-        # Handle special cases for configuration values
-        for key, val in widget_config.items():
-            if isinstance(val, str) and val.startswith('-'):
-                widget_config[key] = val[1:]
-            if key in ('borderwidth', 'highlightthickness', 'padx', 'pady'):
-                widget_config[key] = int(val) if val else 0
-            if key == 'font':
-                font_parts = val.split()
-                if len(font_parts) > 1 and font_parts[1].isdigit():
-                    widget_config[key] = (font_parts[0], int(font_parts[1]))
-                else:
-                    widget_config[key] = val
-            if key == 'width' and val == 'borderwidth':
-                widget_config[key] = 1
-
-        # Ensure valid configuration values
-        widget_config = {k: v for k, v in widget_config.items() if v is not None and v != ''}
-
-        # Handle special cases for Text widget
-        if widget_class == tk.Text:
-            widget_clone = widget_class(parent, **widget_config)
-            widget_clone.insert(tk.END, widget.get("1.0", tk.END))
-        else:
-            widget_clone = widget_class(parent, **widget_config)
-
-        for child in widget.winfo_children():
-            self.clone_widget(child, widget_clone)
-        return widget_clone
-
-    def handle_msg_command(self, recipient, message, sender):
-        """Handle the !msg command to leave a message for another user."""
-        self.save_pending_message(recipient, sender, message)
-        self.send_full_message(f"Message for {recipient} saved. They will receive it the next time they are seen in the chatroom.")
-
-    def check_and_send_pending_messages(self, username):
-        """Check for and send any pending messages for the given username."""
-        pending_messages = self.get_pending_messages(username)
-        for msg in pending_messages:
-            sender = msg['sender']
-            message = msg['message']
-            timestamp = msg['timestamp']
-            self.send_direct_message(username, f"Message from {sender}: {message}")
-            self.delete_pending_message(username, timestamp)
-
-    def load_no_spam_state(self):
-        if os.path.exists("nospam_state.json"):
-            with open("nospam_state.json", "r") as file:
-                data = json.load(file)
-                return data.get("nospam", False)
-        return False
-
-    def save_no_spam_state(self):
-        with open("nospam_state.json", "w") as file:
-            json.dump({"nospam": self.no_spam_mode.get()}, file)
-
-    def handle_doc_command(self, query, username):
-        """Handle the !doc command to create a document using ChatGPT with no length restrictions."""
-        if not query:
-            self.send_private_message(username, "Please provide a query for the document.")
-            return
-
-        try:
-            # Get unrestricted response from ChatGPT
-            response = self.get_chatgpt_document_response(query)
-            
-            # Save the response to a temporary file
-            filename = f"document_{int(time.time())}.txt"
-            with open(filename, 'w', encoding='utf-8') as file:
-                file.write(response)
-
-            # Upload to S3 with no chunk limitations
-            try:
-                s3_client = boto3.client('s3', region_name='us-east-1')
-                bucket_name = 'bot-files-repo'
-                
-                with open(filename, 'rb') as file:
-                    s3_client.put_object(
-                        Bucket=bucket_name,
-                        Key=filename,
-                        Body=file,
-                        ContentType='text/plain'
-                    )
-                
-                # Generate direct download link
-                s3_url = f"https://{bucket_name}.s3.amazonaws.com/{filename}"
-                
-                # Send a notification without chunking
-                self.send_private_message(username, f"Your document is ready: {s3_url}")
-                
-                # Delete the local file after successful upload
-                os.remove(filename)
-                
-            except Exception as e:
-                self.send_private_message(username, f"Error uploading document: {str(e)}")
-                
-        except Exception as e:
-            self.send_private_message(username, f"Error generating document: {str(e)}")
-
-    def get_chatgpt_document_response(self, prompt):
-        """Get unrestricted response from ChatGPT specifically for document generation."""
-        if not self.openai_client:
-            return "OpenAI client is not initialized."
-
-        messages = [
-            {"role": "system", "content": "You are a helpful assistant tasked with creating detailed documents. Provide thorough, verbose, and well-structured responses."},
-            {"role": "user", "content": f"Create a comprehensive document about: {prompt}"}
-        ]
-
-        try:
-            completion = self.openai_client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=messages,
-                n=1,
-                max_tokens=10000,  # Increased token limit for documents
-                temperature=0.2,
-                presence_penalty=0.6,  # Encourage more diverse content
-                frequency_penalty=0.5  # Reduce repetition
-            )
-            return completion.choices[0].message.content
-        except Exception as e:
-            return f"Error with ChatGPT API: {str(e)}"
+        return valid_codes.get(color_code, None)
 
     def send_message(self, event=None):
         """Send the user's typed message to the BBS."""
@@ -2032,7 +1617,6 @@ class BBSBotApp:
     def parse_incoming_triggers(self, line):
         # Remove ANSI codes for easier parsing 😎
         ansi_escape_regex = re.compile(r'\x1b\[(.*?)m')
-        clean_line = ansi_escape_regex.sub('', line)
         clean_line = ansi_escape_regex.sub('', line)
 
         # Always allow the !nospam command to toggle state
@@ -2968,7 +2552,7 @@ class BBSBotApp:
             return "OpenAI client is not initialized."
 
         messages = [
-            {"role": "system", "content": "You are a helpful assistant tasked with creating detailed documents. Provide thorough and well-structured responses."},
+            {"role": "system", "content": "You are a helpful assistant tasked with creating detailed documents. Provide thorough, verbose, and well-structured responses."},
             {"role": "user", "content": f"Create a comprehensive document about: {prompt}"}
         ]
 
@@ -2977,149 +2561,14 @@ class BBSBotApp:
                 model="gpt-4o-mini",
                 messages=messages,
                 n=1,
-                max_tokens=4000,  # Increased token limit for documents
-                temperature=0.7,
+                max_tokens=10000,  # Increased token limit for documents
+                temperature=0.2,
                 presence_penalty=0.6,  # Encourage more diverse content
                 frequency_penalty=0.5  # Reduce repetition
             )
             return completion.choices[0].message.content
         except Exception as e:
             return f"Error with ChatGPT API: {str(e)}"
-
-    def send_message(self, event=None):
-        """Send the user's typed message to the BBS."""
-        if not self.connected or not self.writer:
-            self.append_terminal_text("Not connected to any BBS.\n", "normal")
-            return
-
-        user_input = self.input_var.get()
-        self.input_var.set("")
-        if user_input.strip():
-            prefix = "Gos " if self.mud_mode.get() else ""
-            message = prefix + user_input
-            asyncio.run_coroutine_threadsafe(self._send_message(message + "\r\n"), self.loop)
-            self.append_terminal_text(message + "\n", "normal")
-            print(f"Sent to BBS: {message}")
-
-    async def _send_message(self, message):
-        """Coroutine to send a message."""
-        self.writer.write(message)
-        await self.writer.drain()
-
-    def send_full_message(self, message):
-        """
-        Send a full message to the terminal display and the BBS server.
-        """
-        prefix = "Gos " if self.mud_mode.get() else ""
-        lines = message.split('\n')
-        full_message = '\n'.join([prefix + line for line in lines])
-        chunks = self.chunk_message(full_message, 250)  # Use the new chunk_message!
-
-        for chunk in chunks:
-            self.append_terminal_text(chunk + "\n", "normal")
-            if self.connected and self.writer:
-                asyncio.run_coroutine_threadsafe(self._send_message(chunk + "\r\n"), self.loop)
-                time.sleep(0.1)  # Add a short delay to ensure messages are sent in sequence
-                print(f"Sent to BBS: {chunk}")  # Log chunks sent to BBS
-
-    def chunk_message(self, message, chunk_size):
-        """
-        Break a message into chunks, up to `chunk_size` characters each,
-        ensuring no splits in the middle of words or lines.
-
-        1. Split by newline to preserve paragraph boundaries.
-        2. For each paragraph, break it into word-based lines
-           that do not exceed chunk_size.
-        """
-        paragraphs = message.split('\n')
-        final_chunks = []
-
-        for para in paragraphs:
-            # If paragraph is totally empty, keep it as a blank line
-            if not para.strip():
-                final_chunks.append('')
-                continue
-
-            words = para.split()
-            current_line_words = []
-
-            for word in words:
-                if not current_line_words:
-                    # Start a fresh line
-                    current_line_words.append(word)
-                else:
-                    # Test if we can add " word" without exceeding chunk_size
-                    test_line = ' '.join(current_line_words + [word])
-                    if len(test_line) <= chunk_size:
-                        current_line_words.append(word)
-                    else:
-                        # We have to finalize the current line
-                        final_chunks.append(' '.join(current_line_words))
-                        current_line_words = [word]
-
-            # Any leftover words in current_line_words
-            if current_line_words:
-                final_chunks.append(' '.join(current_line_words))
-
-        return final_chunks
-
-    def append_terminal_text(self, text, default_tag="normal"):
-        """Append text to the terminal display with ANSI parsing."""
-        self.terminal_display.configure(state=tk.NORMAL)
-        self.parse_ansi_and_insert(text)
-        self.terminal_display.see(tk.END)
-        self.terminal_display.configure(state=tk.DISABLED)
-
-    def parse_ansi_and_insert(self, text_data):
-        """Minimal parser for ANSI color codes (foreground only)."""
-        ansi_escape_regex = re.compile(r'\x1b\[(.*?)m')
-
-        last_end = 0
-        current_tag = "normal"
-
-        for match in ansi_escape_regex.finditer(text_data):
-            start, end = match.span()
-            # Insert text before this ANSI code with current tag
-            if start > last_end:
-                self.terminal_display.insert(tk.END, text_data[last_end:start].replace('& # 3 9 ;', "'"), current_tag)
-
-            code_string = match.group(1)
-            codes = code_string.split(';')
-            if '0' in codes:
-                current_tag = "normal"
-                codes.remove('0')
-
-            for c in codes:
-                mapped_tag = self.map_code_to_tag(c)
-                if mapped_tag:
-                    current_tag = mapped_tag
-
-            last_end = end
-
-        if last_end < len(text_data):
-            self.terminal_display.insert(tk.END, text_data[last_end:].replace('& # 3 9 ;', "'"), current_tag)
-
-    def map_code_to_tag(self, color_code):
-        """Map a numeric color code to a defined Tk text tag."""
-        valid_codes = {
-            '30': 'black',
-            '31': 'red',
-            '32': 'green',
-            '33': 'yellow',
-            '34': 'blue',
-            '35': 'magenta',
-            '36': 'cyan',
-            '37': 'white',
-            '90': 'bright_black',
-            '91': 'bright_red',
-            '92': 'bright_green',
-            '93': 'bright_yellow',
-            '94': 'bright_blue',
-            '95': 'bright_magenta',
-            '96': 'bright_cyan',
-            '97': 'bright_white',
-        }
-        return valid_codes.get(color_code, None)
 
 def main():
     try:
