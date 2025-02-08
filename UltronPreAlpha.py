@@ -1693,6 +1693,9 @@ class BBSBotApp:
                     # Process known commands.
                     if message.startswith("!said"):
                         self.handle_said_command(sender, message)
+                    elif message.startswith("!doc"):
+                        query = message.split("!doc", 1)[1].strip()
+                        self.handle_doc_command(query, sender, public=True)
                     else:
                         self.handle_public_trigger(sender, message)
                     return
@@ -1771,7 +1774,7 @@ class BBSBotApp:
                     query = clean_line.split("!doc", 1)[1].strip()
                     username_match = re.match(r'From (.+?):', clean_line)
                     username = username_match.group(1) if username_match else "public_chat"
-                    self.handle_doc_command(query, username)
+                    self.handle_doc_command(query, username, public=True)
                 
 
         # Update the previous line
@@ -2556,10 +2559,13 @@ class BBSBotApp:
         with open("nospam_state.json", "w") as file:
             json.dump({"nospam": self.no_spam_mode.get()}, file)
 
-    def handle_doc_command(self, query, username):
+    def handle_doc_command(self, query, username, public=False):
         """Handle the !doc command to create a document using ChatGPT and provide an S3 link to the file."""
         if not query:
-            self.send_private_message(username, "Please provide a query for the document.")
+            if public:
+                self.send_full_message(f"Please provide a query for the document, {username}.")
+            else:
+                self.send_private_message(username, "Please provide a query for the document.")
             return
 
         # Prepare the prompt for ChatGPT
@@ -2598,7 +2604,10 @@ class BBSBotApp:
             response_message = f"Error creating document: {str(e)}"
 
         # Send the download link to the user
-        self.send_private_message(username, response_message)
+        if public:
+            self.send_full_message(response_message)
+        else:
+            self.send_private_message(username, response_message)
 
     def get_chatgpt_document_response(self, prompt):
         """Send a prompt to ChatGPT and return the full response as a string."""
@@ -2688,7 +2697,7 @@ class BBSBotApp:
             response = self.get_gif_response(query)
         elif "!doc" in message:
             query = message.split("!doc", 1)[1].strip()
-            self.handle_doc_command(query, username)
+            self.handle_doc_command(query, username, public=True)
             return  # Exit early to avoid sending a response twice
         elif "!said" in message:
             self.handle_said_command(username, message)
