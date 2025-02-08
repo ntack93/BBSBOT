@@ -2638,24 +2638,38 @@ class BBSBotApp:
         username = username.lower()
         if username not in self.public_message_history:
             self.public_message_history[username] = []
-        self.public_message_history[username].append(message)
+        # Split the message into lines and store each line separately
+        lines = message.split('\n')
+        for line in lines:
+            self.public_message_history[username].append(line)
         if len(self.public_message_history[username]) > 3:
-            self.public_message_history[username].pop(0)
+            self.public_message_history[username] = self.public_message_history[username][-3:]
 
     def handle_said_command(self, sender, command_text):
         """Handle the !said command to report the last three public messages of a user."""
         parts = command_text.split()
-        if len(parts) != 2:
-            self.send_full_message(f"Usage: !said <username>")
+        if len(parts) == 1:
+            # No username provided, report the last three things said in the chatroom
+            all_messages = []
+            for user_messages in self.public_message_history.values():
+                all_messages.extend(user_messages)
+            all_messages = all_messages[-3:]  # Get the last three messages
+            if not all_messages:
+                self.send_full_message("No public messages found.")
+                return
+            response = "Last three public messages in the chatroom:\n" + "\n".join([f"{i+1}. {msg}" for i, msg in enumerate(all_messages)])
+        elif len(parts) == 2:
+            # Username provided, report the last three messages from that user
+            target_username = parts[1].lower()
+            if target_username not in self.public_message_history:
+                self.send_full_message(f"No public messages found for {target_username}.")
+                return
+            messages = self.public_message_history[target_username][-3:]  # Get the last three messages
+            response = f"Last three public messages from {target_username}:\n" + "\n".join([f"{i+1}. {msg}" for i, msg in enumerate(messages)])
+        else:
+            self.send_full_message("Usage: !said [<username>]")
             return
 
-        target_username = parts[1].lower()
-        if target_username not in self.public_message_history:
-            self.send_full_message(f"No public messages found for {target_username}.")
-            return
-
-        messages = self.public_message_history[target_username]
-        response = f"Last three public messages from {target_username}: " + " ".join([f"{i+1}. {msg}" for i, msg in enumerate(messages)])
         self.send_full_message(response)
 
     def handle_public_trigger(self, username, message):
