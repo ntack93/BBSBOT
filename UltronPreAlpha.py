@@ -1696,6 +1696,9 @@ class BBSBotApp:
                     elif message.startswith("!doc"):
                         query = message.split("!doc", 1)[1].strip()
                         self.handle_doc_command(query, sender, public=True)
+                    elif message.startswith("!seen"):
+                        target_username = message.split("!seen", 1)[1].strip()
+                        self.handle_seen_command(target_username)
                     else:
                         self.handle_public_trigger(sender, message)
                     return
