@@ -661,7 +661,7 @@ class BBSBotApp:
         if self.writer:
             try:
                 self.writer.close()
-                await self.writer.drain()  # Ensure the writer is closed properly
+                await self.writer.wait_closed()  # Ensure the writer is closed properly
             except Exception as e:
                 print(f"Error closing writer: {e}")
         else:
@@ -2646,7 +2646,7 @@ class BBSBotApp:
             return
 
         messages = self.public_message_history[target_username]
-        response = f"Last three public messages from {target_username}: " + " ".join([f"{i+1}. {msg}" for i, msg in enumerate(messages)])
+        response = f"Last three public messages from {target_username}:\n" + "\n".join(messages)
         self.send_full_message(response)
 
     def handle_public_trigger(self, username, message):
@@ -2722,9 +2722,8 @@ def main():
         finally:
             try:
                 loop = asyncio.get_event_loop()
-                if not loop.is_running():
-                    loop.run_until_complete(loop.shutdown_asyncgens())
-                    loop.close()
+                loop.run_until_complete(loop.shutdown_asyncgens())
+                loop.close()
             except Exception as e:
                 print(f"Error closing event loop: {e}")
 
