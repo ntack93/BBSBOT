@@ -606,6 +606,7 @@ class BBSBotApp:
                 port=port,
                 term=self.terminal_mode.get().lower(),
                 encoding='cp437',
+                cols=136  # Set terminal width to 136 columns
             )
         except Exception as e:
             self.msg_queue.put_nowait(f"Connection failed: {e}\n")
@@ -2660,7 +2661,7 @@ class BBSBotApp:
             if not all_messages:
                 self.send_full_message("No public messages found.")
                 return
-            response = "Last three public messages in the chatroom:\n" + "\n".join([f"{i+1}. {msg}" for i, msg in enumerate(all_messages)])
+            response = "Last three public messages in the chatroom: " + " ".join(all_messages)
         elif len(parts) == 2:
             # Username provided, report the last three messages from that user
             target_username = parts[1].lower()
@@ -2668,7 +2669,7 @@ class BBSBotApp:
                 self.send_full_message(f"No public messages found for {target_username}.")
                 return
             messages = self.public_message_history[target_username][-3:]  # Get the last three messages
-            response = f"Last three public messages from {target_username}:\n" + "\n".join([f"{i+1}. {msg}" for i, msg in enumerate(messages)])
+            response = f"Last three public messages from {target_username}: " + " ".join(messages)
         else:
             self.send_full_message("Usage: !said [<username>]")
             return
