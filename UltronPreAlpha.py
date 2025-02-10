@@ -876,7 +876,7 @@ class BBSBotApp:
             username = page_message_match.group(1)
             module_or_channel = page_message_match.group(3)
             message = page_message_match.group(4)
-            self.handle_page_trigger(username, module_or_channel, message)
+            self._trigger(username, module_or_channel, message)
             return
 
         # Check for direct messages
@@ -935,7 +935,7 @@ class BBSBotApp:
         elif '(n)onstop, (q)uit, or (c)ontinue?' in clean_line.lower():
             self.send_enter_keystroke()
 
-# Update the previous line
+        # Update the previous line
         self.previous_line = clean_line
 
     def send_enter_keystroke(self):
@@ -979,7 +979,7 @@ class BBSBotApp:
             response = self.get_crypto_price(crypto)
         elif "!gif" in message:
             query = message.split("!gif", 1)[1].strip()
-            response = self.handle_gif_command(query)
+            response = self.get_gif_response(query)
         elif "!doc" in message:
             query = message.split("!doc", 1)[1].strip()
             self.handle_doc_command(query, username)
@@ -1001,15 +1001,7 @@ class BBSBotApp:
 
         self.send_private_message(username, response)
 
-    def send_private_message(self, username, message):
-        """
-        Send a private message to the specified user.
-        """
-        chunks = self.chunk_message(message, 250)
-        for chunk in chunks:
-            full_message = f"Whisper to {username} {chunk}"
-            asyncio.run_coroutine_threadsafe(self._send_message(full_message + "\r\n"), self.loop)
-            self.append_terminal_text(full_message + "\n", "normal")
+    
 
     def handle_page_trigger(self, username, module_or_channel, message):
         """
@@ -1052,7 +1044,7 @@ class BBSBotApp:
             response = self.get_seen_response(target_username)
         elif "!gif" in message:
             query = message.split("!gif", 1)[1].strip()
-            response = self.handle_gif_command(query)
+            response = self.get_gif_response(query)
         elif "!doc" in message:
             query = message.split("!doc", 1)[1].strip()
             self.handle_doc_command(query, username)
@@ -1071,22 +1063,9 @@ class BBSBotApp:
         if response:
             self.send_page_response(username, module_or_channel, response)
 
-    def get_who_response(self):
-        """Return a list of users currently in the chatroom."""
-        if not self.chat_members:
-            return "No users currently in the chatroom."
-        else:
-            return "Users currently in the chatroom: " + ", ".join(self.chat_members)
+    
 
-    def send_page_response(self, username, module_or_channel, message):
-        """
-        Send a page response to the specified user and module/channel.
-        """
-        chunks = self.chunk_message(message, 250)
-        for chunk in chunks:
-            full_message = f"/P {username} {chunk}"
-            asyncio.run_coroutine_threadsafe(self._send_message(full_message + "\r\n"), self.loop)
-            self.append_terminal_text(full_message + "\n", "normal")
+    
 
     def handle_direct_message(self, username, message):
         """
@@ -1314,33 +1293,9 @@ class BBSBotApp:
         print(f"[DEBUG] ChatGPT response: {gpt_response}")  # Log ChatGPT response
         return gpt_response
 
-    def handle_chatgpt_command(self, user_text, username=None):
-        """
-        Send user_text to ChatGPT and handle responses.
-        The response can be longer than 220 characters but will be split into blocks.
-        """
-        self.refresh_membership()  # Refresh membership before generating response
-        time.sleep(1)  # Allow time for membership list to be updated
-        self.master.update()  # Process any pending updates
+    
 
-        # Fetch the latest chat members from DynamoDB
-        self.chat_members = set(self.get_chat_members())
-        print(f"[DEBUG] Updated chat members list before generating response: {self.chat_members}")
-
-        response = self.get_chatgpt_response(user_text, username=username)
-        self.send_full_message(response)
-
-        # Save the conversation for non-directed messages
-        if username is None:
-            username = "public_chat"
-        self.save_conversation(username, user_text, response)
-
-    def handle_news_command(self, topic):
-        """Fetch top 2 news headlines based on the given topic."""
-        response = self.get_news_response(topic)
-        chunks = self.chunk_message(response, 250)
-        for chunk in chunks:
-            self.send_full_message(chunk)
+    
 
     def get_map_response(self, place):
         """Fetch place info from Google Places API and return the response as a string."""
@@ -1754,7 +1709,7 @@ class BBSBotApp:
                     elif message.startswith("!polly"):
                         parts = message.split(maxsplit=2)
                         if len(parts) < 3:
-                            self.send_full_message("Usage: !polly <voice> <text>")
+                            self.send_full_message("Usage: !polly <voice> <text> - Voices are Ruth, Joanna, Danielle, Matthew, Stephen")
                         else:
                             voice = parts[1]
                             text = parts[2]
@@ -1785,7 +1740,7 @@ class BBSBotApp:
                             self.handle_timer_command(sender, value, unit)
                     elif message.startswith("!gif"):
                         query = message.split("!gif", 1)[1].strip()
-                        self.handle_gif_command(query)
+                        self.send_full_message(self.get_gif_response(query))
                     elif message.startswith("!msg"):
                         parts = message.split(maxsplit=2)
                         if len(parts) < 3:
@@ -1812,63 +1767,7 @@ class BBSBotApp:
         # Update the previous line
         self.previous_line = clean_line
 
-    def handle_private_trigger(self, username, message):
-        """
-        Handle private message triggers and respond privately.
-        """
-        response = "Unknown command."  # Initialize response with a default value
-        if "!weather" in message:
-            location = message.split("!weather", 1)[1].strip()
-            response = self.get_weather_response(location)
-        elif "!yt" in message:
-            query = message.split("!yt", 1)[1].strip()
-            response = self.get_youtube_response(query)
-        elif "!search" in message:
-            query = message.split("!search", 1)[1].strip()
-            response = self.get_web_search_response(query)
-        elif "!chat" in message:
-            query = message.split("!chat", 1)[1].strip()
-            response = self.get_chatgpt_response(query, username=username)
-        elif "!news" in message:
-            topic = message.split("!news", 1)[1].strip()
-            response = self.get_news_response(topic)
-        elif "!map" in message:
-            place = message.split("!map", 1)[1].strip()
-            response = self.get_map_response(place)
-        elif "!pic" in message:
-            query = message.split("!pic", 1)[1].strip()
-            response = self.get_pic_response(query)
-        elif "!help" in message:
-            response = self.get_help_response()
-        elif "!stocks" in message:
-            symbol = message.split("!stocks", 1)[1].strip()
-            response = self.get_stock_price(symbol)
-        elif "!crypto" in message:
-            crypto = message.split("!crypto", 1)[1].strip()
-            response = self.get_crypto_price(crypto)
-        elif "!gif" in message:
-            query = message.split("!gif", 1)[1].strip()
-            response = self.handle_gif_command(query)
-        elif "!doc" in message:
-            query = message.split("!doc", 1)[1].strip()
-            self.handle_doc_command(query, username)
-            return  # Exit early to avoid sending a response twice
-        elif "!said" in message:
-            self.handle_said_command(username, message)
-        elif "!pod" in message:
-            parts = message.split(maxsplit=2)
-            if len(parts) < 3:
-                self.send_private_message(username, "Usage: !pod <show> <episode name or number>")
-                return
-            show = parts[1]
-            episode = parts[2]
-            self.handle_pod_command(username, show, episode)
-            return
-        else:
-            # Assume it's a message for the !chat trigger
-            response = self.get_chatgpt_response(message, username=username)
-
-        self.send_private_message(username, response)
+    
 
     def send_private_message(self, username, message):
         """
@@ -1880,65 +1779,7 @@ class BBSBotApp:
             asyncio.run_coroutine_threadsafe(self._send_message(full_message + "\r\n"), self.loop)
             self.append_terminal_text(full_message + "\n", "normal")
 
-    def handle_page_trigger(self, username, module_or_channel, message):
-        """
-        Handle page message triggers and respond accordingly.
-        """
-        response = None  # Initialize response with None
-        if "!weather" in message:
-            location = message.split("!weather", 1)[1].strip()
-            response = self.get_weather_response(location)
-        elif "!yt" in message:
-            query = message.split("!yt", 1)[1].strip()
-            response = self.get_youtube_response(query)
-        elif "!search" in message:
-            query = message.split("!search", 1)[1].strip()
-            response = self.get_web_search_response(query)
-        elif "!chat" in message:
-            query = message.split("!chat", 1)[1].strip()
-            response = self.get_chatgpt_response(query, username=username)
-        elif "!news" in message:
-            topic = message.split("!news", 1)[1].strip()
-            response = self.get_news_response(topic)
-        elif "!map" in message:
-            place = message.split("!map", 1)[1].strip()
-            response = self.get_map_response(place)
-        elif "!pic" in message:
-            query = message.split("!pic", 1)[1].strip()
-            response = self.get_pic_response(query)
-        elif "!help" in message:
-            response = self.get_help_response()
-        elif "!stocks" in message:
-            symbol = message.split("!stocks", 1)[1].strip()
-            response = self.get_stock_price(symbol)
-        elif "!crypto" in message:
-            crypto = message.split("!crypto", 1)[1].strip()
-            response = self.get_crypto_price(crypto)
-        elif "!who" in message:
-            response = self.get_who_response()
-        elif "!seen" in message:
-            target_username = message.split("!seen", 1)[1].strip()
-            response = self.get_seen_response(target_username)
-        elif "!gif" in message:
-            query = message.split("!gif", 1)[1].strip()
-            response = self.handle_gif_command(query)
-        elif "!doc" in message:
-            query = message.split("!doc", 1)[1].strip()
-            self.handle_doc_command(query, username)
-        elif "!said" in message:
-            self.handle_said_command(username, message, is_page=True, module_or_channel=module_or_channel)
-        elif "!pod" in message:
-            parts = message.split(maxsplit=2)
-            if len(parts) < 3:
-                self.send_page_response(username, module_or_channel, "Usage: !pod <show> <episode name or number>")
-                return
-            show = parts[1]
-            episode = parts[2]
-            self.handle_pod_command(username, show, episode, is_page=True, module_or_channel=module_or_channel)
-            return
-
-        if response:
-            self.send_page_response(username, module_or_channel, response)
+    
 
     def get_who_response(self):
         """Return a list of users currently in the chatroom."""
@@ -2503,8 +2344,8 @@ class BBSBotApp:
                 if not gifs:
                     response = f"No GIFs found for '{query}'."
                 else:
-                    gif_url = gifs[0]["url"]
-                    response = f"Here is your GIF: {gif_url}"
+                    gif_url = gifs[0].get("url", "No URL")
+                    response = f"GIF for '{query}': {gif_url}"
             except requests.exceptions.RequestException as e:
                 response = f"Error fetching GIF: {str(e)}"
 
@@ -2760,7 +2601,7 @@ class BBSBotApp:
             response = self.get_crypto_price(crypto)
         elif "!gif" in message:
             query = message.split("!gif", 1)[1].strip()
-            response = self.handle_gif_command(query)
+            response = self.get_gif_response(query)
         elif "!doc" in message:
             query = message.split("!doc", 1)[1].strip()
             self.handle_doc_command(query, username, public=True)

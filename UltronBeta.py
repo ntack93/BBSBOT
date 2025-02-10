@@ -71,13 +71,15 @@ class BBSBotApp:
         self.mud_mode = tk.BooleanVar(value=False)
         self.alpha_vantage_api_key = tk.StringVar(value=DEFAULT_ALPHA_VANTAGE_API_KEY)  # Ensure Alpha Vantage API Key is loaded
         self.coinmarketcap_api_key = tk.StringVar(value=DEFAULT_COINMARKETCAP_API_KEY)  # Ensure CoinMarketCap API Key is loaded
-        self.logon_automation_enabled = tk.BooleanVar(value=False)  # Add Logon Automation toggle
+        self.logon_automation_enabled = tk.BooleanVar(value=False)  # Correct initialization
         self.auto_login_enabled = tk.BooleanVar(value=False)  # Add Auto Login toggle
         self.giphy_api_key = tk.StringVar(value=DEFAULT_GIPHY_API_KEY)  # Add Giphy API Key
         self.split_view_enabled = False  # Add Split View toggle
         self.split_view_clones = []  # Track split view clones
         self.no_spam_mode = tk.BooleanVar(value=self.load_no_spam_state())  # Initialize using saved state
         self.public_message_history = {}  # Dictionary to store public messages
+        self.multi_line_buffer = {}    # Maps username -> accumulated message string
+        self.multiline_timeout = {}    # Maps username -> timeout ID (from after())
 
         # For best ANSI alignment, recommend a CP437-friendly monospace font:
         self.font_name = tk.StringVar(value="Courier New")
@@ -606,6 +608,7 @@ class BBSBotApp:
                 port=port,
                 term=self.terminal_mode.get().lower(),
                 encoding='cp437',
+                cols=136  # Set terminal width to 136 columns
             )
         except Exception as e:
             self.msg_queue.put_nowait(f"Connection failed: {e}\n")
@@ -932,7 +935,7 @@ class BBSBotApp:
         elif '(n)onstop, (q)uit, or (c)ontinue?' in clean_line.lower():
             self.send_enter_keystroke()
 
-        # Update the previous line
+# Update the previous line
         self.previous_line = clean_line
 
     def send_enter_keystroke(self):
@@ -976,13 +979,22 @@ class BBSBotApp:
             response = self.get_crypto_price(crypto)
         elif "!gif" in message:
             query = message.split("!gif", 1)[1].strip()
-            response = self.get_gif_response(query)
+            response = self.handle_gif_command(query)
         elif "!doc" in message:
             query = message.split("!doc", 1)[1].strip()
             self.handle_doc_command(query, username)
             return  # Exit early to avoid sending a response twice
         elif "!said" in message:
             self.handle_said_command(username, message)
+        elif "!pod" in message:
+            parts = message.split(maxsplit=2)
+            if len(parts) < 3:
+                self.send_private_message(username, "Usage: !pod <show> <episode name or number>")
+                return
+            show = parts[1]
+            episode = parts[2]
+            self.handle_pod_command(username, show, episode)
+            return
         else:
             # Assume it's a message for the !chat trigger
             response = self.get_chatgpt_response(message, username=username)
@@ -1003,6 +1015,7 @@ class BBSBotApp:
         """
         Handle page message triggers and respond accordingly.
         """
+        response = None  # Initialize response with None
         if "!weather" in message:
             location = message.split("!weather", 1)[1].strip()
             response = self.get_weather_response(location)
@@ -1039,16 +1052,32 @@ class BBSBotApp:
             response = self.get_seen_response(target_username)
         elif "!gif" in message:
             query = message.split("!gif", 1)[1].strip()
-            response = self.get_gif_response(query)
+            response = self.handle_gif_command(query)
         elif "!doc" in message:
             query = message.split("!doc", 1)[1].strip()
             self.handle_doc_command(query, username)
         elif "!said" in message:
-            self.handle_said_command(username, message)
-        else:
-            response = "Unknown command."
+            self.handle_said_command(username, message, is_page=True, module_or_channel=module_or_channel)
+        elif "!pod" in message:
+            parts = message.split(maxsplit=2)
+            if len(parts) < 3:
+                self.send_page_response(username, module_or_channel, "Usage: !pod <show> <episode name or number>")
+                return
+            show = parts[1]
+            episode = parts[2]
+            self.handle_pod_command(username, show, episode, is_page=True, module_or_channel=module_or_channel)
+            return
+        elif "!polly" in message:
+            parts = message.split(maxsplit=2)
+            if len(parts) < 3:
+                self.send_page_response(username, module_or_channel, "Usage: !polly <voice> <text> - Voices are Ruth, Joanna, Danielle, Matthew, Stephen")
+                return
+            voice = parts[1]
+            text = parts[2]
+            self.handle_polly_command(voice, text)
 
-        self.send_page_response(username, module_or_channel, response)
+        if response:
+            self.send_page_response(username, module_or_channel, response)
 
     def get_who_response(self):
         """Return a list of users currently in the chatroom."""
@@ -1084,6 +1113,15 @@ class BBSBotApp:
             response = self.get_chatgpt_response(query, direct=True, username=username)
         elif "!said" in message:
             self.handle_said_command(username, message)
+            return
+        elif "!pod" in message:
+            parts = message.split(maxsplit=2)
+            if len(parts) < 3:
+                self.send_direct_message(username, "Usage: !pod <show> <episode name or number>")
+                return
+            show = parts[1]
+            episode = parts[2]
+            self.handle_pod_command(username, show, episode)
             return
         else:
             response = self.get_chatgpt_response(message, direct=True, username=username)
@@ -1223,6 +1261,7 @@ class BBSBotApp:
             "You are just a laidback guy, hanging out in the bbs chatroom. "
             "Respond concisely in 220-characters or less but don't exceed 250 total characters in your responses. "
             "If asked about who's in the room, reference the current chatroom members list. "
+            "You are speaking in a BBS plain text chatroom, please make sure any emoji you use are plain text, and that the format of your responses is ideal for plain text. "
             f"The current chatroom members are: {chatroom_members_str}."
         )
 
@@ -1232,6 +1271,7 @@ class BBSBotApp:
                 "You are just a laidback guy, hanging out in the bbs chatroom. "
                 "Respond concisely in 220-characters or less but don't exceed 250 total characters in your responses. "
                 "If asked about who's in the room, reference the current chatroom members list. "
+                "You are speaking in a BBS plain text chatroom, please make sure any emoji you use are plain text, and that the format of your responses is ideal for plain text. "
                 f"The current chatroom members are: {chatroom_members_str}."
             )
 
@@ -1354,14 +1394,9 @@ class BBSBotApp:
         return (
             "Available commands: Please use a ! immediately followed by one of the following keywords (no space): "
             "weather <location>, yt <query>, search <query>, chat <message>, news <topic>, map <place>, pic <query>, "
-            "polly <voice> <text>, mp3yt <youtube link>, help, seen <username>, "
-            "greeting, stocks <symbol>, crypto <symbol>, timer <value> <minutes or seconds>, gif <query>, msg <username> <message>, nospam."
+            "polly <voice> <text>, mp3yt <youtube link>, help, seen <username>, greeting, stocks <symbol>, "
+            "crypto <symbol>, timer <value> <minutes or seconds>, gif <query>, msg <username> <message>, doc <query>, pod <show> <episode> nospam.\n"
         )
-
-    def handle_help_command(self):
-        """Provide a list of available commands, adhering to character and chunk limits."""
-        help_message = self.get_help_response()
-        self.send_full_message(help_message)
 
     def append_terminal_text(self, text, default_tag="normal"):
         """Append text to the terminal display with ANSI parsing."""
@@ -1421,6 +1456,10 @@ class BBSBotApp:
         }
         return valid_codes.get(color_code, None)
 
+    def replace_newline_markers(self, text):
+        """Replace /n markers with actual newline characters."""
+        return text.replace("/n", "\n")
+
     def send_message(self, event=None):
         """Send the user's typed message to the BBS."""
         if not self.connected or not self.writer:
@@ -1429,9 +1468,12 @@ class BBSBotApp:
 
         user_input = self.input_var.get()
         self.input_var.set("")
-        if user_input.strip():
+        # Replace the /n markers with newline characters
+        processed_input = self.replace_newline_markers(user_input)
+
+        if processed_input.strip():
             prefix = "Gos " if self.mud_mode.get() else ""
-            message = prefix + user_input
+            message = prefix + processed_input
             asyncio.run_coroutine_threadsafe(self._send_message(message + "\r\n"), self.loop)
             self.append_terminal_text(message + "\n", "normal")
             print(f"Sent to BBS: {message}")
@@ -1673,7 +1715,7 @@ class BBSBotApp:
                 message = direct_message_match.group(2)
                 self.handle_direct_message(username, message)
             else:
-                # Process public and other triggers here...
+                # Process known commands.
                 public_trigger_match = re.match(r'From (.+?): (.+)', clean_line)
                 if public_trigger_match:
                     sender = public_trigger_match.group(1)
@@ -1686,96 +1728,97 @@ class BBSBotApp:
                     if sender.lower() == "ultron":
                         return
 
-                    # Only process messages that begin with a trigger.
-                    if not message.startswith("!"):
+                    # Only process messages that begin with a recognized command.
+                    valid_commands = [
+                        "!weather", "!yt", "!search", "!chat", "!news", "!map",
+                        "!pic", "!polly", "!mp3yt", "!help", "!seen", "!greeting",
+                        "!stocks", "!crypto", "!timer", "!gif", "!msg", "!doc", "!pod", "!said"
+                    ]
+                    if not any(message.startswith(cmd) for cmd in valid_commands):
                         return
 
-                    # Process known commands.
-                    if message.startswith("!said"):
+                    # Process recognized commands.
+                    if message.startswith("!weather"):
+                        location = message.split("!weather", 1)[1].strip()
+                        self.send_full_message(self.get_weather_response(location))
+                    elif message.startswith("!yt"):
+                        query = message.split("!yt", 1)[1].strip()
+                        self.send_full_message(self.get_youtube_response(query))
+                    elif message.startswith("!search"):
+                        query = message.split("!search", 1)[1].strip()
+                        self.send_full_message(self.get_web_search_response(query))
+                    elif message.startswith("!chat"):
+                        query = message.split("!chat", 1)[1].strip()
+                        self.send_full_message(self.get_chatgpt_response(query, username=sender))
+                    elif message.startswith("!news"):
+                        topic = message.split("!news", 1)[1].strip()
+                        self.send_full_message(self.get_news_response(topic))
+                    elif message.startswith("!map"):
+                        place = message.split("!map", 1)[1].strip()
+                        self.send_full_message(self.get_map_response(place))
+                    elif message.startswith("!pic"):
+                        query = message.split("!pic", 1)[1].strip()
+                        self.send_full_message(self.get_pic_response(query))
+                    elif message.startswith("!polly"):
+                        parts = message.split(maxsplit=2)
+                        if len(parts) < 3:
+                            self.send_full_message("Usage: !polly <voice> <text> - Voices are Ruth, Joanna, Danielle, Matthew, Stephen")
+                        else:
+                            voice = parts[1]
+                            text = parts[2]
+                            self.handle_polly_command(voice, text)
+                    elif message.startswith("!mp3yt"):
+                        url = message.split("!mp3yt", 1)[1].strip()
+                        self.handle_ytmp3_command(url)
+                    elif message.startswith("!help"):
+                        self.send_full_message(self.get_help_response())
+                    elif message.startswith("!seen"):
+                        target_username = message.split("!seen", 1)[1].strip()
+                        self.send_full_message(self.get_seen_response(target_username))
+                    elif message.startswith("!greeting"):
+                        self.handle_greeting_command()
+                    elif message.startswith("!stocks"):
+                        symbol = message.split("!stocks", 1)[1].strip()
+                        self.send_full_message(self.get_stock_price(symbol))
+                    elif message.startswith("!crypto"):
+                        crypto = message.split("!crypto", 1)[1].strip()
+                        self.send_full_message(self.get_crypto_price(crypto))
+                    elif message.startswith("!timer"):
+                        parts = message.split(maxsplit=3)
+                        if len(parts) < 3:
+                            self.send_full_message("Usage: !timer <value> <minutes or seconds>")
+                        else:
+                            value = parts[1]
+                            unit = parts[2]
+                            self.handle_timer_command(sender, value, unit)
+                    elif message.startswith("!gif"):
+                        query = message.split("!gif", 1)[1].strip()
+                        self.handle_gif_command(query)
+                    elif message.startswith("!msg"):
+                        parts = message.split(maxsplit=2)
+                        if len(parts) < 3:
+                            self.send_full_message("Usage: !msg <username> <message>")
+                        else:
+                            recipient = parts[1]
+                            msg = parts[2]
+                            self.handle_msg_command(recipient, msg, sender)
+                    elif message.startswith("!doc"):
+                        query = message.split("!doc", 1)[1].strip()
+                        self.handle_doc_command(query, sender, public=True)
+                    elif message.startswith("!pod"):
+                        parts = message.split(maxsplit=2)
+                        if len(parts) < 3:
+                            self.send_full_message("Usage: !pod <show> <episode name or number>")
+                        else:
+                            show = parts[1]
+                            episode = parts[2]
+                            self.handle_pod_command(sender, show, episode)
+                    elif message.startswith("!said"):
                         self.handle_said_command(sender, message)
-                    else:
-                        self.handle_public_trigger(sender, message)
-                    return
-
-                if self.previous_line == ":***" and clean_line.startswith("->"):
-                    entrance_message = clean_line[3:].strip()
-                    self.handle_user_greeting(entrance_message)
-                elif re.match(r'(.+?) just joined this channel!', clean_line):
-                    username = re.match(r'(.+?) just joined this channel!', clean_line).group(1)
-                    self.handle_user_greeting(username)
-                elif re.match(r'(.+?)@(.+?) just joined this channel!', clean_line):
-                    username = re.match(r'(.+?)@(.+?) just joined this channel!', clean_line).group(1)
-                    self.handle_user_greeting(username)
-                elif re.match(r'Topic: \(.*?\)\.\s*(.*?)\s*are here with you\.', clean_line, re.DOTALL):
-                    self.update_chat_members(clean_line)
-                # Public trigger commands:
-                elif "!weather" in clean_line:
-                    location = clean_line.split("!weather", 1)[1].strip()
-                    self.handle_weather_command(location)
-                elif "!yt" in clean_line:
-                    query = clean_line.split("!yt", 1)[1].strip()
-                    self.handle_youtube_command(query)
-                elif "!search" in clean_line:
-                    query = clean_line.split("!search", 1)[1].strip()
-                    self.handle_web_search_command(query)
-                elif "!chat" in clean_line:
-                    query = clean_line.split("!chat", 1)[1].strip()
-                    username_match = re.match(r'From (.+?):', clean_line)
-                    username = username_match.group(1) if username_match else "public_chat"
-                    self.handle_chatgpt_command(query, username=username)
-                elif "!news" in clean_line:
-                    topic = clean_line.split("!news", 1)[1].strip()
-                    self.handle_news_command(topic)
-                elif "!map" in clean_line:
-                    place = clean_line.split("!map", 1)[1].strip()
-                    self.handle_map_command(place)
-                elif "!pic" in clean_line:
-                    query = clean_line.split("!pic", 1)[1].strip()
-                    self.handle_pic_command(query)
-                elif "!polly" in clean_line:
-                    parts = clean_line.split("!polly", 1)[1].strip().split(maxsplit=1)
-                    if len(parts) == 2:
-                        voice, text = parts
-                        self.handle_polly_command(voice, text)
-                    else:
-                        self.send_full_message("Please choose a Polly voice and provide text to convert. The voices are: Matthew, Stephen, Ruth, Joanna, Danielle.")
-                elif "!mp3yt" in clean_line:
-                    url = clean_line.split("!mp3yt", 1)[1].strip()
-                    self.handle_ytmp3_command(url)
-                elif "!help" in clean_line:
-                    self.handle_help_command()
-                elif "!seen" in clean_line:
-                    target_username = clean_line.split("!seen", 1)[1].strip()
-                    self.handle_seen_command(target_username)
-                elif "!greeting" in clean_line:
-                    self.handle_greeting_command()
-                elif "!stocks" in clean_line:
-                    symbol = clean_line.split("!stocks", 1)[1].strip()
-                    self.handle_stock_command(symbol)
-                elif "!crypto" in clean_line:
-                    crypto = clean_line.split("!crypto", 1)[1].strip()
-                    self.handle_crypto_command(crypto)
-                elif "!gif" in clean_line:
-                    query = clean_line.split("!gif", 1)[1].strip()
-                    self.handle_gif_command(query)
-                elif "!msg" in clean_line:
-                    parts = clean_line.split("!msg", 1)[1].strip().split(maxsplit=1)
-                    if len(parts) == 2:
-                        recipient, message = parts
-                        sender_match = re.match(r'From (.+?):', clean_line)
-                        sender = sender_match.group(1) if sender_match else "unknown"
-                        self.handle_msg_command(recipient, message, sender)
-                    else:
-                        self.send_full_message("Please use the syntax '!msg <username> <message>'.")
-                elif "!doc" in clean_line:
-                    query = clean_line.split("!doc", 1)[1].strip()
-                    username_match = re.match(r'From (.+?):', clean_line)
-                    username = username_match.group(1) if username_match else "public_chat"
-                    self.handle_doc_command(query, username)
-                
+                        return
 
         # Update the previous line
-                self.previous_line = clean_line
+        self.previous_line = clean_line
 
     def handle_private_trigger(self, username, message):
         """
@@ -1813,13 +1856,22 @@ class BBSBotApp:
             response = self.get_crypto_price(crypto)
         elif "!gif" in message:
             query = message.split("!gif", 1)[1].strip()
-            response = self.get_gif_response(query)
+            response = self.handle_gif_command(query)
         elif "!doc" in message:
             query = message.split("!doc", 1)[1].strip()
             self.handle_doc_command(query, username)
             return  # Exit early to avoid sending a response twice
         elif "!said" in message:
             self.handle_said_command(username, message)
+        elif "!pod" in message:
+            parts = message.split(maxsplit=2)
+            if len(parts) < 3:
+                self.send_private_message(username, "Usage: !pod <show> <episode name or number>")
+                return
+            show = parts[1]
+            episode = parts[2]
+            self.handle_pod_command(username, show, episode)
+            return
         else:
             # Assume it's a message for the !chat trigger
             response = self.get_chatgpt_response(message, username=username)
@@ -1840,6 +1892,7 @@ class BBSBotApp:
         """
         Handle page message triggers and respond accordingly.
         """
+        response = None  # Initialize response with None
         if "!weather" in message:
             location = message.split("!weather", 1)[1].strip()
             response = self.get_weather_response(location)
@@ -1876,16 +1929,32 @@ class BBSBotApp:
             response = self.get_seen_response(target_username)
         elif "!gif" in message:
             query = message.split("!gif", 1)[1].strip()
-            response = self.get_gif_response(query)
+            response = self.handle_gif_command(query)
         elif "!doc" in message:
             query = message.split("!doc", 1)[1].strip()
             self.handle_doc_command(query, username)
         elif "!said" in message:
-            self.handle_said_command(username, message)
-        else:
-            response = "Unknown command."
+            self.handle_said_command(username, message, is_page=True, module_or_channel=module_or_channel)
+        elif "!pod" in message:
+            parts = message.split(maxsplit=2)
+            if len(parts) < 3:
+                self.send_page_response(username, module_or_channel, "Usage: !pod <show> <episode name or number>")
+                return
+            show = parts[1]
+            episode = parts[2]
+            self.handle_pod_command(username, show, episode, is_page=True, module_or_channel=module_or_channel)
+            return
+        elif "!polly" in message:
+            parts = message.split(maxsplit=2)
+            if len(parts) < 3:
+                self.send_page_response(username, module_or_channel, "Usage: !polly <voice> <text> - Voices are Ruth, Joanna, Danielle, Matthew, Stephen")
+                return
+            voice = parts[1]
+            text = parts[2]
+            self.handle_polly_command(voice, text)
 
-        self.send_page_response(username, module_or_channel, response)
+        if response:
+            self.send_page_response(username, module_or_channel, response)
 
     def get_who_response(self):
         """Return a list of users currently in the chatroom."""
@@ -2450,8 +2519,8 @@ class BBSBotApp:
                 if not gifs:
                     response = f"No GIFs found for '{query}'."
                 else:
-                    gif_url = gifs[0].get("url", "No URL")
-                    response = f"GIF for '{query}': {gif_url}"
+                    gif_url = gifs[0]["url"]
+                    response = f"Here is your GIF: {gif_url}"
             except requests.exceptions.RequestException as e:
                 response = f"Error fetching GIF: {str(e)}"
 
@@ -2556,10 +2625,13 @@ class BBSBotApp:
         with open("nospam_state.json", "w") as file:
             json.dump({"nospam": self.no_spam_mode.get()}, file)
 
-    def handle_doc_command(self, query, username):
+    def handle_doc_command(self, query, username, public=False):
         """Handle the !doc command to create a document using ChatGPT and provide an S3 link to the file."""
         if not query:
-            self.send_private_message(username, "Please provide a query for the document.")
+            if public:
+                self.send_full_message(f"Please provide a query for the document, {username}.")
+            else:
+                self.send_private_message(username, "Please provide a query for the document.")
             return
 
         # Prepare the prompt for ChatGPT
@@ -2598,7 +2670,10 @@ class BBSBotApp:
             response_message = f"Error creating document: {str(e)}"
 
         # Send the download link to the user
-        self.send_private_message(username, response_message)
+        if public:
+            self.send_full_message(response_message)
+        else:
+            self.send_private_message(username, response_message)
 
     def get_chatgpt_document_response(self, prompt):
         """Send a prompt to ChatGPT and return the full response as a string."""
@@ -2629,31 +2704,47 @@ class BBSBotApp:
         username = username.lower()
         if username not in self.public_message_history:
             self.public_message_history[username] = []
-        self.public_message_history[username].append(message)
+        # Split the message into lines and store each line separately
+        lines = message.split('\n')
+        for line in lines:
+            self.public_message_history[username].append(line)
         if len(self.public_message_history[username]) > 3:
-            self.public_message_history[username].pop(0)
+            self.public_message_history[username] = self.public_message_history[username][-3:]
 
-    def handle_said_command(self, sender, command_text):
+    def handle_said_command(self, sender, command_text, is_page=False, module_or_channel=None):
         """Handle the !said command to report the last three public messages of a user."""
         parts = command_text.split()
-        if len(parts) != 2:
-            self.send_full_message(f"Usage: !said <username>")
-            return
+        if len(parts) == 1:
+            # No username provided, report the last three things said in the chatroom
+            all_messages = []
+            for user_messages in self.public_message_history.values():
+                all_messages.extend(user_messages)
+            all_messages = all_messages[-3:]  # Get the last three messages
+            if not all_messages:
+                response = "No public messages found."
+            else:
+                response = "Last three public messages in the chatroom: " + " ".join(all_messages)
+        elif len(parts) == 2:
+            # Username provided, report the last three messages from that user
+            target_username = parts[1].lower()
+            if target_username not in self.public_message_history:
+                response = f"No public messages found for {target_username}."
+            else:
+                messages = self.public_message_history[target_username][-3:]  # Get the last three messages
+                response = f"Last three public messages from {target_username}: " + " ".join(messages)
+        else:
+            response = "Usage: !said [<username>]"
 
-        target_username = parts[1].lower()
-        if target_username not in self.public_message_history:
-            self.send_full_message(f"No public messages found for {target_username}.")
-            return
-
-        messages = self.public_message_history[target_username]
-        response = f"Last three public messages from {target_username}: " + " ".join([f"{i+1}. {msg}" for i, msg in enumerate(messages)])
-        self.send_full_message(response)
+        if is_page and module_or_channel:
+            self.send_page_response(sender, module_or_channel, response)
+        else:
+            self.send_full_message(response)
 
     def handle_public_trigger(self, username, message):
         """
         Handle public message triggers and respond accordingly.
         """
-        response = "Unknown command."  # Initialize response with a default value
+        response = None  # Initialize response with None
         if "!weather" in message:
             location = message.split("!weather", 1)[1].strip()
             response = self.get_weather_response(location)
@@ -2685,20 +2776,97 @@ class BBSBotApp:
             response = self.get_crypto_price(crypto)
         elif "!gif" in message:
             query = message.split("!gif", 1)[1].strip()
-            response = self.get_gif_response(query)
+            response = self.handle_gif_command(query)
         elif "!doc" in message:
             query = message.split("!doc", 1)[1].strip()
-            self.handle_doc_command(query, username)
+            self.handle_doc_command(query, username, public=True)
             return  # Exit early to avoid sending a response twice
         elif "!said" in message:
             self.handle_said_command(username, message)
-        else:
-            # Assume it's a message for the !chat trigger
-            response = self.get_chatgpt_response(message, username=username)
+            return
+        elif "!pod" in message:
+            parts = message.split(maxsplit=2)
+            if len(parts) < 3:
+                self.send_full_message("!pod <show> <episode name or number>")
+                return
+            show = parts[1]
+            episode = parts[2]
+            self.handle_pod_command(username, show, episode)
+            return
+        elif "!polly" in message:
+            parts = message.split(maxsplit=2)
+            if len(parts) < 3:
+                self.send_full_message("Usage: !polly <voice> <text> - Voices are Ruth, Joanna, Danielle, Matthew, Stephen")
+                return
+            voice = parts[1]
+            text = parts[2]
+            self.handle_polly_command(voice, text)
 
-        self.send_full_message(response)
+        if response:
+            self.send_full_message(response)
+
+    def handle_pod_command(self, sender, show, episode, is_page=False, module_or_channel=None):
+        """Handle the !pod command to fetch podcast episode details."""
+        response = self.get_podcast_response(show, episode)
+        if is_page and module_or_channel:
+            self.send_page_response(sender, module_or_channel, response)
+        else:
+            self.send_full_message(response)
+
+    def get_podcast_response(self, show, episode):
+        """Query the iTunes API for podcast episode details."""
+        url = "https://itunes.apple.com/search"
+        # Build parameters with a cache-buster parameter
+        params = {
+            "term": f"{show} {episode}",
+            "media": "podcast",
+            "entity": "podcastEpisode",
+            "limit": 10,  # Increase limit to 10 results
+            "cb": int(time.time())  # Cache buster to force a fresh request
+        }
+        try:
+            # Add header to prevent caching
+            r = requests.get(url, params=params, headers={"Cache-Control": "no-cache"})
+            data = r.json()
+            if data["resultCount"] == 0:
+                # Retry with just the show name if no results found
+                params["term"] = show
+                params["cb"] = int(time.time())  # Update cache buster
+                r = requests.get(url, params=params, headers={"Cache-Control": "no-cache"})
+                data = r.json()
+                if data["resultCount"] == 0:
+                    return f"No matching episode found for {show} {episode}."
+
+            results = data["results"]
+            best_match = None
+
+            # Check if the episode argument is numeric and adjust matching accordingly.
+            is_numeric_episode = episode.isdigit()
+
+            for result in results:
+                title = result.get("trackName", "").lower()
+                description = result.get("description", "").lower()
+                if is_numeric_episode:
+                    if f"episode {episode}" in title or f"episode {episode}" in description:
+                        best_match = result
+                        break
+                else:
+                    if episode.lower() in title or episode.lower() in description:
+                        best_match = result
+                        break
+
+            if not best_match:
+                return f"No matching episode found for {show} {episode}."
+
+            title = best_match.get("trackName", "N/A")
+            release_date = best_match.get("releaseDate", "N/A")
+            preview_url = best_match.get("previewUrl", "N/A")
+            return f"Title: {title}\nRelease Date: {release_date}\nPreview: {preview_url}"
+        except Exception as e:
+            return f"Error fetching podcast details: {str(e)}"
 
 def main():
+    app = None  # Ensure app is defined
     try:
         asyncio.set_event_loop(asyncio.new_event_loop())
         root = tk.Tk()
@@ -2709,7 +2877,7 @@ def main():
     except Exception as e:
         print(f"An error occurred: {e}")
     finally:
-        if app.connected:
+        if app and app.connected:
             try:
                 asyncio.run_coroutine_threadsafe(app.disconnect_from_bbs(), app.loop).result()
             except Exception as e:
@@ -2723,7 +2891,6 @@ def main():
             try:
                 loop = asyncio.get_event_loop()
                 if not loop.is_running():
-                    loop.run_until_complete(loop.shutdown_asyncgens())
                     loop.close()
             except Exception as e:
                 print(f"Error closing event loop: {e}")
