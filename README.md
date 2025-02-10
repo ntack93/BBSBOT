@@ -27,6 +27,7 @@ BBS Chat Bot is a Python application that functions as a BBS Teleconference Bot 
 - **Keep-Alive:** Maintains the connection with periodic messages.
 - **No Spam Mode:** Toggle the processing of non-triggered public messages with `!nospam`.
 - **Document Generation:** Use `!doc <topic>` to generate a detailed document using ChatGPT.
+- **Trump's Latest Post:** Use `!trump` to fetch and display Donald Trump's latest post from Truth Social.
 - **NEW – !said Command:** In public chat, type `!said <username>` to display the three most recent public messages from that user.
 
 ## Requirements
@@ -45,21 +46,29 @@ BBS Chat Bot is a Python application that functions as a BBS Teleconference Bot 
 
 1. **Clone the repository:**
 
+   ```sh
    git clone https://github.com/ntack93/BBSBOT.git  
    cd BBSBOT
+   ```
 
 2. **Install the required Python packages:**
 
+   ```sh
    pip install -r requirements.txt
+   ```
 
 3. **Create configuration files:**  
    Create `username.json` and `password.json` in the project directory containing your credentials. For example:
 
-   For username.json:  
+   For `username.json`:  
+   ```json
    "your_username"
+   ```
 
-   For password.json:  
+   For `password.json`:  
+   ```json
    "your_password"
+   ```
 
 ## API Setup
 
@@ -93,7 +102,9 @@ For conversation persistence and user management, set up the following tables in
 
 Configure your AWS credentials using:
 
+   ```sh
    aws configure
+   ```
 
 and follow the prompts.
 
@@ -101,9 +112,11 @@ and follow the prompts.
 
 1. **Run the application:**
 
-   python jeremy.py
+   ```sh
+   python ultronprealpha.py
+   ```
 
-   *Note: Although the main script is named "jeremy.py", the bot’s persona is Ultron.*
+   *Note: Although the main script is named "ultronprealpha.py", the bot’s persona is Ultron.*
 
 2. **Connect to a BBS:**  
    Enter the BBS host and port in the GUI and click "Connect".
@@ -116,7 +129,9 @@ and follow the prompts.
 4. **Using the New !said Command:**  
    In public chat, type:
 
+   ```sh
    !said <username>
+   ```
 
    to retrieve and display the three most recent public messages from that user.
 
@@ -130,8 +145,7 @@ and follow the prompts.
 
 ## File Structure
 
-- jeremy.py: Main application script.
-- doctriggerversion.py: Alternate version with document generation trigger.
+- ultronprealpha.py: Main application script.
 - ultron(MacOS).py: MacOS-specific version of the bot.
 - README.md: This README file.
 - requirements.txt: List of required Python packages.
