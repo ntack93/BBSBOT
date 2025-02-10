@@ -6,6 +6,7 @@ import telnetlib3
 import time
 import queue
 import re
+import sys
 import requests
 import openai
 import json
@@ -935,7 +936,7 @@ class BBSBotApp:
         elif '(n)onstop, (q)uit, or (c)ontinue?' in clean_line.lower():
             self.send_enter_keystroke()
 
-        # Update the previous line
+# Update the previous line
         self.previous_line = clean_line
 
     def send_enter_keystroke(self):
@@ -1679,7 +1680,7 @@ class BBSBotApp:
                     valid_commands = [
                         "!weather", "!yt", "!search", "!chat", "!news", "!map",
                         "!pic", "!polly", "!mp3yt", "!help", "!seen", "!greeting",
-                        "!stocks", "!crypto", "!timer", "!gif", "!msg", "!doc", "!pod", "!said"
+                        "!stocks", "!crypto", "!timer", "!gif", "!msg", "!doc", "!pod", "!said", "!trump"
                     ]
                     if not any(message.startswith(cmd) for cmd in valid_commands):
                         return
@@ -1762,6 +1763,12 @@ class BBSBotApp:
                             self.handle_pod_command(sender, show, episode)
                     elif message.startswith("!said"):
                         self.handle_said_command(sender, message)
+                        return
+                    elif message.startswith("!trump"):
+                        trump_text = self.get_trump_post()
+                        chunks = self.chunk_message(trump_text, 250)
+                        for chunk in chunks:
+                            self.send_full_message(chunk)
                         return
 
         # Update the previous line
@@ -2681,6 +2688,39 @@ class BBSBotApp:
             return f"Title: {title}\nRelease Date: {release_date}\nPreview: {preview_url}"
         except Exception as e:
             return f"Error fetching podcast details: {str(e)}"
+
+    def get_trump_post(self):
+        import subprocess
+        try:
+            command = [
+                sys.executable,
+                r"C:\Users\Noah\OneDrive\Documents\bbschatbot1.0\TrumpsLatestPostScraper.py"
+            ]
+            result = subprocess.run(command, capture_output=True, text=True, timeout=180)
+            output = result.stdout.strip()
+
+            if result.returncode != 0:
+                # If the script returned a non-zero exit code
+                error_msg = result.stderr.strip() or "Unknown error from Trump scraper."
+                return f"Error from Trump post script: {error_msg}"
+
+            # Parse lines for “Latest Post:” and “Posted on:”
+            post_content = None
+            post_time = None
+            for line in output.splitlines():
+                if "Latest Post:" in line:
+                    post_content = line.replace("Latest Post:", "").strip()
+                elif "Posted on:" in line:
+                    post_time = line.replace("Posted on:", "").strip()
+                elif "No recent post found" in line:
+                    return "No recent post found on Truth Social."
+
+            if post_content and post_time:
+                return f"Trump’s latest post (posted on {post_time}): {post_content}"
+            else:
+                return "Could not parse Trump’s latest Truth Social post."
+        except Exception as e:
+            return f"Error running Trump post script: {str(e)}"
 
 def main():
     app = None  # Ensure app is defined
