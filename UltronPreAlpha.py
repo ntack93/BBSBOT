@@ -935,7 +935,7 @@ class BBSBotApp:
         elif '(n)onstop, (q)uit, or (c)ontinue?' in clean_line.lower():
             self.send_enter_keystroke()
 
-        # Update the previous line
+# Update the previous line
         self.previous_line = clean_line
 
     def send_enter_keystroke(self):
@@ -979,7 +979,7 @@ class BBSBotApp:
             response = self.get_crypto_price(crypto)
         elif "!gif" in message:
             query = message.split("!gif", 1)[1].strip()
-            response = self.get_gif_response(query)
+            response = self.handle_gif_command(query)
         elif "!doc" in message:
             query = message.split("!doc", 1)[1].strip()
             self.handle_doc_command(query, username)
@@ -1052,7 +1052,7 @@ class BBSBotApp:
             response = self.get_seen_response(target_username)
         elif "!gif" in message:
             query = message.split("!gif", 1)[1].strip()
-            response = self.get_gif_response(query)
+            response = self.handle_gif_command(query)
         elif "!doc" in message:
             query = message.split("!doc", 1)[1].strip()
             self.handle_doc_command(query, username)
@@ -1785,7 +1785,7 @@ class BBSBotApp:
                             self.handle_timer_command(sender, value, unit)
                     elif message.startswith("!gif"):
                         query = message.split("!gif", 1)[1].strip()
-                        self.send_full_message(self.get_gif_response(query))
+                        self.handle_gif_command(query)
                     elif message.startswith("!msg"):
                         parts = message.split(maxsplit=2)
                         if len(parts) < 3:
@@ -1848,7 +1848,7 @@ class BBSBotApp:
             response = self.get_crypto_price(crypto)
         elif "!gif" in message:
             query = message.split("!gif", 1)[1].strip()
-            response = self.get_gif_response(query)
+            response = self.handle_gif_command(query)
         elif "!doc" in message:
             query = message.split("!doc", 1)[1].strip()
             self.handle_doc_command(query, username)
@@ -1921,7 +1921,7 @@ class BBSBotApp:
             response = self.get_seen_response(target_username)
         elif "!gif" in message:
             query = message.split("!gif", 1)[1].strip()
-            response = self.get_gif_response(query)
+            response = self.handle_gif_command(query)
         elif "!doc" in message:
             query = message.split("!doc", 1)[1].strip()
             self.handle_doc_command(query, username)
@@ -2503,8 +2503,8 @@ class BBSBotApp:
                 if not gifs:
                     response = f"No GIFs found for '{query}'."
                 else:
-                    gif_url = gifs[0].get("url", "No URL")
-                    response = f"GIF for '{query}': {gif_url}"
+                    gif_url = gifs[0]["url"]
+                    response = f"Here is your GIF: {gif_url}"
             except requests.exceptions.RequestException as e:
                 response = f"Error fetching GIF: {str(e)}"
 
@@ -2760,7 +2760,7 @@ class BBSBotApp:
             response = self.get_crypto_price(crypto)
         elif "!gif" in message:
             query = message.split("!gif", 1)[1].strip()
-            response = self.get_gif_response(query)
+            response = self.handle_gif_command(query)
         elif "!doc" in message:
             query = message.split("!doc", 1)[1].strip()
             self.handle_doc_command(query, username, public=True)
