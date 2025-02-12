@@ -1,11 +1,10 @@
 # BBS Chat Bot
 
-BBS Chat Bot is a Python application that functions as a BBS Teleconference Bot with a chatbot persona named **Ultron**. Ultron provides a graphical user interface (GUI) built with Tkinter, allowing users to configure connection settings, toggle modes, and manage favorite BBS addresses.
+BBS Chat Bot is a Python application that functions as a BBS Teleconference Bot with the purpose of bringing modern amenities to the teleconference module. It's multi-function operation works via a !trigger system.
 
 ## Features
 
 - **BBS Connection:** Connect to a BBS using a specified host and port.
-- **Terminal Modes:** Toggle between ANSI and RIPscript terminal emulation modes. *(In Development)*
 - **Favorites Management:** Add, remove, and load favorite BBS addresses.
 - **Web Search:** Use `!search <keyword>` for Google Custom Searches.
 - **ChatGPT Interaction:** Use `!chat <query>` to communicate with ChatGPT.
@@ -19,16 +18,16 @@ BBS Chat Bot is a Python application that functions as a BBS Teleconference Bot 
 - **Text-to-Speech:** Use `!polly <voice> <text>` to convert text to speech with AWS Polly.
 - **YouTube to MP3:** Use `!mp3yt <youtube link>` to download YouTube videos as MP3.
 - **GIF Search:** Use `!gif <query>` to fetch a popular GIF.
-- **Timer:** Use `!timer <value> <minutes or seconds>` to set a timer. *(Still in Development)*
+- **Timer:** Use `!timer <value> <minutes or seconds>` to set a timer. 
 - **Private Messaging:** Use `!msg <username> <message>` to leave a message for another user.
 - **Conversation Persistence:** Save conversations using DynamoDB.
 - **Split View:** Create multiple bot instances in one interface. *(Still in Development)*
 - **Auto-Greeting:** Automatically greet new users in the chatroom.
 - **Keep-Alive:** Maintains the connection with periodic messages.
-- **No Spam Mode:** Toggle the processing of non-triggered public messages with `!nospam`.
+- **No Spam Mode:** Prevents the bot from responding to public triggers with `!nospam`.
 - **Document Generation:** Use `!doc <topic>` to generate a detailed document using ChatGPT.
 - **Trump's Latest Post:** Use `!trump` to fetch and display Donald Trump's latest post from Truth Social.
-- **NEW – !said Command:** In public chat, type `!said <username>` to display the three most recent public messages from that user.
+- **NEW – !said Command:** In public chat, type `!said <username>` to display the three most recent public messages from that user or !said by itself for the last three messages sent to the chatroom in general.
 
 ## Requirements
 
