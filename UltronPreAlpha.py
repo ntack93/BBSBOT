@@ -1741,7 +1741,9 @@ class BBSBotApp:
                             self.handle_timer_command(sender, value, unit)
                     elif message.startswith("!gif"):
                         query = message.split("!gif", 1)[1].strip()
-                        self.send_full_message(self.get_gif_response(query))
+                        gif_response = self.get_gif_response(query)
+                        if gif_response:
+                            self.send_full_message(gif_response)
                     elif message.startswith("!msg"):
                         parts = message.split(maxsplit=2)
                         if len(parts) < 3:
@@ -2056,7 +2058,7 @@ class BBSBotApp:
             self.send_direct_message(new_member_username, response)
 
     def get_pic_response(self, query):
-        """Fetch a random picture from Pexels based on the query and return a string response."""
+        """Fetch a random picture from Pexels based on the query."""
         key = self.pexels_api_key.get()
         if not key:
             return "Pexels API key is missing."
@@ -2074,7 +2076,7 @@ class BBSBotApp:
             }
             try:
                 r = requests.get(url, headers=headers, params=params, timeout=10)
-                r.raise_for_status()  # Raise HTTPError for bad responses
+                r.raise_for_status()  # Raise an HTTPError for bad responses
                 data = r.json()
                 photos = data.get("photos", [])
                 if not photos:
@@ -2087,6 +2089,33 @@ class BBSBotApp:
             except requests.exceptions.RequestException as e:
                 return f"Error fetching picture: {str(e)}"
 
+    def get_gif_response(self, query):
+        """Fetch a popular GIF based on the query and return a string response."""
+        key = self.giphy_api_key.get()
+        if not key:
+            return "Giphy API key is missing."
+        elif not query:
+            return "Please specify a query."
+        else:
+            url = "https://api.giphy.com/v1/gifs/search"
+            params = {
+                "api_key": key,
+                "q": query,
+                "limit": 1,
+                "rating": "g"
+            }
+            try:
+                r = requests.get(url, params=params, timeout=10)
+                r.raise_for_status()  # Raise an HTTPError for bad responses
+                data = r.json()
+                gifs = data.get("data", [])
+                if not gifs:
+                    return f"No GIFs found for '{query}'."
+                else:
+                    gif_url = gifs[0].get("url", "No URL")
+                    return f"GIF for '{query}': {gif_url}"
+            except requests.exceptions.RequestException as e:
+                return f"Error fetching GIF: {str(e)}"
 
     def refresh_membership(self):
         """Refresh the membership list by sending an ENTER keystroke and allowing time for processing."""
@@ -2327,7 +2356,7 @@ class BBSBotApp:
         self.timers[timer_id] = self.master.after(duration * 1000, timer_callback)
         self.send_full_message(f"Timer set for {username} for {value} {unit}.")
 
-    def handle_gif_command(self, query):
+    def get_gif_response(self, query):
         """Fetch a popular GIF based on the query."""
         key = self.giphy_api_key.get()
         if not key:
