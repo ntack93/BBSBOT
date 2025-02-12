@@ -2055,13 +2055,13 @@ class BBSBotApp:
             response = self.get_chatgpt_response(greeting_message, direct=True, username=new_member_username)
             self.send_direct_message(new_member_username, response)
 
-    def handle_pic_command(self, query):
-        """Fetch a random picture from Pexels based on the query."""
+    def get_pic_response(self, query):
+        """Fetch a random picture from Pexels based on the query and return a string response."""
         key = self.pexels_api_key.get()
         if not key:
-            response = "Pexels API key is missing."
+            return "Pexels API key is missing."
         elif not query:
-            response = "Please specify a query."
+            return "Please specify a query."
         else:
             url = "https://api.pexels.com/v1/search"
             headers = {
@@ -2074,20 +2074,19 @@ class BBSBotApp:
             }
             try:
                 r = requests.get(url, headers=headers, params=params, timeout=10)
-                r.raise_for_status()  # Raise an HTTPError for bad responses
+                r.raise_for_status()  # Raise HTTPError for bad responses
                 data = r.json()
                 photos = data.get("photos", [])
                 if not photos:
-                    response = f"No pictures found for '{query}'."
+                    return f"No pictures found for '{query}'."
                 else:
                     photo = photos[0]
                     photographer = photo.get("photographer", "Unknown")
                     src = photo.get("src", {}).get("original", "No URL")
-                    response = f"Photo by {photographer}: {src}"
+                    return f"Photo by {photographer}: {src}"
             except requests.exceptions.RequestException as e:
-                response = f"Error fetching picture: {str(e)}"
+                return f"Error fetching picture: {str(e)}"
 
-        self.send_full_message(response)
 
     def refresh_membership(self):
         """Refresh the membership list by sending an ENTER keystroke and allowing time for processing."""
@@ -2328,13 +2327,13 @@ class BBSBotApp:
         self.timers[timer_id] = self.master.after(duration * 1000, timer_callback)
         self.send_full_message(f"Timer set for {username} for {value} {unit}.")
 
-    def get_gif_response(self, query):
+    def handle_gif_command(self, query):
         """Fetch a popular GIF based on the query."""
         key = self.giphy_api_key.get()
         if not key:
-            return "Giphy API key is missing."
+            response = "Giphy API key is missing."
         elif not query:
-            return "Please specify a query."
+            response = "Please specify a query."
         else:
             url = "https://api.giphy.com/v1/gifs/search"
             params = {
@@ -2344,20 +2343,18 @@ class BBSBotApp:
                 "rating": "g"
             }
             try:
-                r = requests.get(url, params=params)
+                r = requests.get(url, params=params, timeout=10)
+                r.raise_for_status()  # Raise an HTTPError for bad responses
                 data = r.json()
                 gifs = data.get("data", [])
                 if not gifs:
-                    return "No GIFs found for the query."
+                    response = f"No GIFs found for '{query}'."
                 else:
-                    gif_url = gifs[0].get("url", "No URL found")
-                    return f"Here is your GIF: {gif_url}"
+                    gif_url = gifs[0].get("url", "No URL")
+                    response = f"GIF for '{query}': {gif_url}"
             except requests.exceptions.RequestException as e:
-                return f"Error fetching GIF: {str(e)}"
+                response = f"Error fetching GIF: {str(e)}"
 
-    def handle_gif_command(self, query):
-        """Handle the !gif command to fetch a GIF."""
-        response = self.get_gif_response(query)
         self.send_full_message(response)
 
     def toggle_split_view(self):
