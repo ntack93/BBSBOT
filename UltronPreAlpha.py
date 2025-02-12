@@ -2328,13 +2328,13 @@ class BBSBotApp:
         self.timers[timer_id] = self.master.after(duration * 1000, timer_callback)
         self.send_full_message(f"Timer set for {username} for {value} {unit}.")
 
-    def handle_gif_command(self, query):
+    def get_gif_response(self, query):
         """Fetch a popular GIF based on the query."""
         key = self.giphy_api_key.get()
         if not key:
-            response = "Giphy API key is missing."
+            return "Giphy API key is missing."
         elif not query:
-            response = "Please specify a query."
+            return "Please specify a query."
         else:
             url = "https://api.giphy.com/v1/gifs/search"
             params = {
@@ -2344,18 +2344,20 @@ class BBSBotApp:
                 "rating": "g"
             }
             try:
-                r = requests.get(url, params=params, timeout=10)
-                r.raise_for_status()  # Raise an HTTPError for bad responses
+                r = requests.get(url, params=params)
                 data = r.json()
                 gifs = data.get("data", [])
                 if not gifs:
-                    response = f"No GIFs found for '{query}'."
+                    return "No GIFs found for the query."
                 else:
-                    gif_url = gifs[0].get("url", "No URL")
-                    response = f"GIF for '{query}': {gif_url}"
+                    gif_url = gifs[0].get("url", "No URL found")
+                    return f"Here is your GIF: {gif_url}"
             except requests.exceptions.RequestException as e:
-                response = f"Error fetching GIF: {str(e)}"
+                return f"Error fetching GIF: {str(e)}"
 
+    def handle_gif_command(self, query):
+        """Handle the !gif command to fetch a GIF."""
+        response = self.get_gif_response(query)
         self.send_full_message(response)
 
     def toggle_split_view(self):
