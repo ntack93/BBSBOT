@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import sys
 import time
 from selenium import webdriver
 from selenium.webdriver.edge.options import Options
@@ -12,6 +13,9 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.action_chains import ActionChains
 
 from bs4 import BeautifulSoup
+
+# Reconfigure standard output to use UTF-8 encoding
+sys.stdout.reconfigure(encoding='utf-8')
 
 def download_truthsocial_page(output_file):
     """
