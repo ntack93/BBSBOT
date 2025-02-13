@@ -129,6 +129,8 @@ class BBSBotApp:
         self.pending_messages_table_name = 'PendingMessages'
         self.create_pending_messages_table()
         self.openai_client = OpenAI(api_key=self.openai_api_key.get())
+        self.spam_tracker = {}  # Dictionary to track user messages and timestamps
+        self.blocked_users = set()  # Set to keep track of blocked users
 
     def create_dynamodb_table(self):
         """Create DynamoDB table if it doesn't exist."""
@@ -581,9 +583,17 @@ class BBSBotApp:
     def toggle_connection(self):
         """Connect or disconnect from the BBS."""
         if self.connected:
-            asyncio.run_coroutine_threadsafe(self.disconnect_from_bbs(), self.loop).result()
+            asyncio.run_coroutine_threadsafe(self.send_exit_command(), self.loop).result()
         else:
             self.start_connection()
+
+    async def send_exit_command(self):
+        """Send '=x' command to the BBS to disconnect."""
+        if self.connected and self.writer:
+            self.writer.write("=x\r\n")
+            await self.writer.drain()
+            self.msg_queue.put_nowait("Sent '=x' to BBS. Disconnecting...\n")
+            await self.disconnect_from_bbs()
 
     def connect_to_bbs(self, address):
         """Connect to the BBS with the given address."""
@@ -724,6 +734,10 @@ class BBSBotApp:
 
         # Process all but the last entry; that last might be incomplete
         for line in lines[:-1]:
+            # Check if the line contains a message from a blocked user
+            if any(blocked_user in line for blocked_user in self.blocked_users):
+                continue
+
             self.append_terminal_text(line + "\n", "normal")
             print(f"Incoming line: {line}")  # Log each incoming line
             self.parse_incoming_triggers(line)
@@ -1631,6 +1645,18 @@ class BBSBotApp:
         ansi_escape_regex = re.compile(r'\x1b\[(.*?)m')
         clean_line = ansi_escape_regex.sub('', line)
 
+        # First, check if the message is from a user who is spamming.
+        username_match = re.search(r'From (.+?) ', clean_line)
+        if username_match:
+            username = username_match.group(1)
+            if self.is_spamming(username):
+                self.block_user(username)
+                return
+
+        # Then (if you really want to ignore non-spam messages from @din.asciiattic.com):
+        if re.search(r'@din\.asciiattic\.com', clean_line):
+            return
+
         # Always allow the !nospam command to toggle state
         if "!nospam" in clean_line:
             # Toggle and persist the new state
@@ -1642,18 +1668,22 @@ class BBSBotApp:
 
         # Detect message types
         private_message_match = re.match(r'From (.+?) \(whispered\): (.+)', clean_line)
-        page_message_match = re.match(r'(.+?) is paging you from (.+?): (.+)', clean_line)
+        page_message_match = re.match(r'(.+?) is paging you (?:from|via) (.+?): (.+)', clean_line)
         direct_message_match = re.match(r'From (.+?) \(to you\): (.+)', clean_line)
 
         # If !nospam is ON, only allow whispered and paging messages.
         if self.no_spam_mode.get() and not (private_message_match or page_message_match):
-            self.append_terminal_text("Ignored trigger due to No Spam Mode.\n", "normal")
             return
 
         # Process private messages
         if private_message_match:
             username = private_message_match.group(1)
             message = private_message_match.group(2)
+            if username in self.blocked_users:
+                return
+            if self.is_spamming(username):
+                self.block_user(username)
+                return
             self.handle_private_trigger(username, message)
         else:
             # Process page commands
@@ -1661,11 +1691,21 @@ class BBSBotApp:
                 username = page_message_match.group(1)
                 module_or_channel = page_message_match.group(2)
                 message = page_message_match.group(3)
+                if username in self.blocked_users:
+                    return
+                if self.is_spamming(username):
+                    self.block_user(username, is_page=True, module_or_channel=module_or_channel)
+                    return
                 self.handle_page_trigger(username, module_or_channel, message)
             # Process direct messages (only if !nospam is OFF)
             elif direct_message_match:
                 username = direct_message_match.group(1)
                 message = direct_message_match.group(2)
+                if username in self.blocked_users:
+                    return
+                if self.is_spamming(username):
+                    self.block_user(username)
+                    return
                 self.handle_direct_message(username, message)
             else:
                 # Process known commands.
@@ -1681,6 +1721,10 @@ class BBSBotApp:
                     if sender.lower() == "ultron":
                         return
 
+                    # Ignore messages from blocked users.
+                    if sender in self.blocked_users:
+                        return
+
                     # Only process messages that begin with a recognized command.
                     valid_commands = [
                         "!weather", "!yt", "!search", "!chat", "!news", "!map",
@@ -1693,95 +1737,120 @@ class BBSBotApp:
                     # Process recognized commands.
                     if message.startswith("!weather"):
                         location = message.split("!weather", 1)[1].strip()
-                        self.send_full_message(self.get_weather_response(location))
+                        response = self.get_weather_response(location)
                     elif message.startswith("!yt"):
                         query = message.split("!yt", 1)[1].strip()
-                        self.send_full_message(self.get_youtube_response(query))
+                        response = self.get_youtube_response(query)
                     elif message.startswith("!search"):
                         query = message.split("!search", 1)[1].strip()
-                        self.send_full_message(self.get_web_search_response(query))
+                        response = self.get_web_search_response(query)
                     elif message.startswith("!chat"):
                         query = message.split("!chat", 1)[1].strip()
-                        self.send_full_message(self.get_chatgpt_response(query, username=sender))
+                        response = self.get_chatgpt_response(query, username=sender)
                     elif message.startswith("!news"):
                         topic = message.split("!news", 1)[1].strip()
-                        self.send_full_message(self.get_news_response(topic))
+                        response = self.get_news_response(topic)
                     elif message.startswith("!map"):
                         place = message.split("!map", 1)[1].strip()
-                        self.send_full_message(self.get_map_response(place))
+                        response = self.get_map_response(place)
                     elif message.startswith("!pic"):
                         query = message.split("!pic", 1)[1].strip()
-                        self.send_full_message(self.get_pic_response(query))
+                        response = self.get_pic_response(query)
                     elif message.startswith("!polly"):
                         parts = message.split(maxsplit=2)
                         if len(parts) < 3:
-                            self.send_full_message("Usage: !polly <voice> <text> - Voices are Ruth, Joanna, Danielle, Matthew, Stephen")
-                        else:
-                            voice = parts[1]
-                            text = parts[2]
-                            self.handle_polly_command(voice, text)
+                            self.send_full_message("Usage: !polly <voice> <text>")
+                            return
+                        voice = parts[1]
+                        text = parts[2]
+                        self.handle_polly_command(voice, text)
                     elif message.startswith("!mp3yt"):
                         url = message.split("!mp3yt", 1)[1].strip()
                         self.handle_ytmp3_command(url)
                     elif message.startswith("!help"):
-                        self.send_full_message(self.get_help_response())
+                        response = self.get_help_response()
                     elif message.startswith("!seen"):
                         target_username = message.split("!seen", 1)[1].strip()
-                        self.send_full_message(self.get_seen_response(target_username))
+                        response = self.get_seen_response(target_username)
                     elif message.startswith("!greeting"):
                         self.handle_greeting_command()
                     elif message.startswith("!stocks"):
                         symbol = message.split("!stocks", 1)[1].strip()
-                        self.send_full_message(self.get_stock_price(symbol))
+                        response = self.get_stock_price(symbol)
                     elif message.startswith("!crypto"):
                         crypto = message.split("!crypto", 1)[1].strip()
-                        self.send_full_message(self.get_crypto_price(crypto))
+                        response = self.get_crypto_price(crypto)
                     elif message.startswith("!timer"):
                         parts = message.split(maxsplit=3)
                         if len(parts) < 3:
                             self.send_full_message("Usage: !timer <value> <minutes or seconds>")
-                        else:
-                            value = parts[1]
-                            unit = parts[2]
-                            self.handle_timer_command(sender, value, unit)
+                            return
+                        value = parts[1]
+                        unit = parts[2]
+                        self.handle_timer_command(sender, value, unit)
                     elif message.startswith("!gif"):
                         query = message.split("!gif", 1)[1].strip()
-                        gif_response = self.get_gif_response(query)
-                        if gif_response:
-                            self.send_full_message(gif_response)
+                        response = self.get_gif_response(query)
                     elif message.startswith("!msg"):
                         parts = message.split(maxsplit=2)
                         if len(parts) < 3:
                             self.send_full_message("Usage: !msg <username> <message>")
-                        else:
-                            recipient = parts[1]
-                            msg = parts[2]
-                            self.handle_msg_command(recipient, msg, sender)
+                            return
+                        recipient = parts[1]
+                        msg = parts[2]
+                        self.handle_msg_command(recipient, msg, sender)
                     elif message.startswith("!doc"):
                         query = message.split("!doc", 1)[1].strip()
                         self.handle_doc_command(query, sender, public=True)
+                        return  # Exit early to avoid sending a response twice
                     elif message.startswith("!pod"):
                         parts = message.split(maxsplit=2)
                         if len(parts) < 3:
                             self.send_full_message("Usage: !pod <show> <episode name or number>")
-                        else:
-                            show = parts[1]
-                            episode = parts[2]
-                            self.handle_pod_command(sender, show, episode)
+                            return
+                        show = parts[1]
+                        episode = parts[2]
+                        self.handle_pod_command(sender, show, episode)
+                        return
                     elif message.startswith("!said"):
                         self.handle_said_command(sender, message)
-                        return
                     elif message.startswith("!trump"):
                         response = self.get_trump_post()
-                        chunks = self.chunk_message(response, 250)
-                        for chunk in chunks:
-                            self.send_full_message(chunk)
-                        return
+
+                    if response:
+                        self.send_full_message(response)
 
         # Update the previous line
         self.previous_line = clean_line
 
-    
+    def is_spamming(self, username):
+        """Check if the user is spamming the bot."""
+        current_time = time.time()
+        if username not in self.spam_tracker:
+            self.spam_tracker[username] = []
+        self.spam_tracker[username].append(current_time)
+
+        # Remove timestamps older than 5 seconds
+        self.spam_tracker[username] = [t for t in self.spam_tracker[username] if current_time - t <= 5]
+
+        # Check if there are 3 or more messages within 5 seconds
+        if len(self.spam_tracker[username]) >= 3:
+            print(f"[DEBUG] Spam detected from {username}: {self.spam_tracker[username]}")  # Debug log
+            return True
+        return False
+
+    def block_user(self, username, is_page=False, module_or_channel=None):
+        """Block the user by sending the appropriate command."""
+        self.blocked_users.add(username)
+        if is_page:
+            block_command = f"/p ignore {username}"
+        else:
+            block_command = f"forget {username}"
+        self.send_full_message(f"User {username} has been blocked for spamming.")
+        asyncio.run_coroutine_threadsafe(self._send_message(block_command + "\r\n"), self.loop)
+        # Clear the user's spam timestamps to avoid repeated blocks
+        if username in self.spam_tracker:
+            del self.spam_tracker[username]
 
     def send_private_message(self, username, message):
         """
