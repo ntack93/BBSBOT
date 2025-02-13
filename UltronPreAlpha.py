@@ -230,11 +230,15 @@ class BBSBotApp:
 
     def get_pending_messages(self, recipient):
         """Retrieve pending messages for a recipient from DynamoDB."""
-        pending_messages_table = dynamodb.Table(self.pending_messages_table_name)
-        response = pending_messages_table.query(
-            KeyConditionExpression=boto3.dynamodb.conditions.Key('recipient').eq(recipient.lower())
-        )
-        return response.get('Items', [])
+        try:
+            pending_messages_table = dynamodb.Table(self.pending_messages_table_name)
+            response = pending_messages_table.query(
+                KeyConditionExpression=boto3.dynamodb.conditions.Key('recipient').eq(recipient.lower())
+            )
+            return response.get('Items', [])
+        except Exception as e:
+            print(f"Error retrieving pending messages for {recipient}: {e}")
+            return []
 
     def delete_pending_message(self, recipient, timestamp):
         """Delete a pending message from DynamoDB."""
@@ -1188,7 +1192,8 @@ class BBSBotApp:
                 "num": 1  # just one top result
             }
             try:
-                r = requests.get(url, params=params)
+                r = requests.get(url, params=params, timeout=10)
+                r.raise_for_status()  # Raise an HTTPError for bad responses
                 data = r.json()
                 items = data.get("items", [])
                 if not items:
@@ -1205,7 +1210,7 @@ class BBSBotApp:
                         f"Snippet: {snippet}\n"
                         f"Link: {link}"
                     )
-            except Exception as e:
+            except requests.exceptions.RequestException as e:
                 return f"Error with Google search: {str(e)}"
 
     def get_chatgpt_response(self, user_text, direct=False, username=None):
@@ -1767,8 +1772,8 @@ class BBSBotApp:
                         self.handle_said_command(sender, message)
                         return
                     elif message.startswith("!trump"):
-                        trump_text = self.get_trump_post()
-                        chunks = self.chunk_message(trump_text, 250)
+                        response = self.get_trump_post()
+                        chunks = self.chunk_message(response, 250)
                         for chunk in chunks:
                             self.send_full_message(chunk)
                         return
@@ -2653,6 +2658,8 @@ class BBSBotApp:
             episode = parts[2]
             self.handle_pod_command(username, show, episode)
             return
+        elif "!trump" in message:
+            response = self.get_trump_post()
 
         if response:
             self.send_full_message(response)
@@ -2718,7 +2725,7 @@ class BBSBotApp:
             return f"Error fetching podcast details: {str(e)}"
 
     def get_trump_post(self):
-        import subprocess
+        """Run the Trump post scraper script and return the latest post."""
         try:
             command = [
                 sys.executable,
