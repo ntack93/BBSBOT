@@ -28,6 +28,7 @@ BBS Chat Bot is a Python application that functions as a BBS Teleconference Bot 
 - **Document Generation:** Use `!doc <topic>` to generate a detailed document using ChatGPT.
 - **Trump's Latest Post:** Use `!trump` to fetch and display Donald Trump's latest post from Truth Social.
 - **NEW – !said Command:** In public chat, type `!said <username>` to display the three most recent public messages from that user or !said by itself for the last three messages sent to the chatroom in general.
+- **Email Sending:** Use `!mail "recipient@example.com" "Subject" "Body"` to send an email using Gmail.
 
 ## Requirements
 
@@ -40,6 +41,7 @@ BBS Chat Bot is a Python application that functions as a BBS Teleconference Bot 
 - pytube (for YouTube video downloads)  
 - pydub (for audio processing)  
 - subprocess (for running external commands)
+- smtplib (for sending emails)
 
 ## Installation
 
@@ -57,7 +59,7 @@ BBS Chat Bot is a Python application that functions as a BBS Teleconference Bot 
    ```
 
 3. **Create configuration files:**  
-   Create `username.json` and `password.json` in the project directory containing your credentials. For example:
+   Create `username.json`, `password.json`, and `email_credentials.json` in the project directory containing your credentials. For example:
 
    For `username.json`:  
    ```json
@@ -67,6 +69,16 @@ BBS Chat Bot is a Python application that functions as a BBS Teleconference Bot 
    For `password.json`:  
    ```json
    "your_password"
+   ```
+
+   For `email_credentials.json`:  
+   ```json
+   {
+       "smtp_server": "smtp.gmail.com",
+       "smtp_port": 587,
+       "sender_email": "your-email@gmail.com",
+       "sender_password": "your-email-password"
+   }
    ```
 
 ## API Setup
@@ -134,10 +146,19 @@ and follow the prompts.
 
    to retrieve and display the three most recent public messages from that user.
 
-5. **Other Commands:**  
+5. **Using the New !mail Command:**  
+   In public chat, type:
+
+   ```sh
+   !mail "recipient@example.com" "Subject" "Body"
+   ```
+
+   to send an email using Gmail.
+
+6. **Other Commands:**  
    Refer to the Features section for a complete list of available commands.
 
-6. **Additional Settings:**  
+7. **Additional Settings:**  
    Use the Settings window to configure API keys and preferences.  
    Use the Favorites window to manage your favorite BBS addresses.  
    To ensure uninterrupted query responses, send the command `/P OK` in the chat to enable unlimited pages.
@@ -152,6 +173,7 @@ and follow the prompts.
 - favorites.json: Stores favorite BBS addresses.
 - username.json: Stores the username.
 - password.json: Stores the password.
+- email_credentials.json: Stores email credentials.
 - last_seen.json: Stores the last seen timestamps for users.
 - nospam_state.json: Stores the state of No Spam Mode.
 
