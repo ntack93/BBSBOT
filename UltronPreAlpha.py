@@ -131,6 +131,7 @@ class BBSBotApp:
         self.openai_client = OpenAI(api_key=self.openai_api_key.get())
         self.spam_tracker = {}  # Dictionary to track user messages and timestamps
         self.blocked_users = set()  # Set to keep track of blocked users
+        self.bot_username = "Ultron"  # Add bot's username
 
     def create_dynamodb_table(self):
         """Create DynamoDB table if it doesn't exist."""
@@ -1649,7 +1650,8 @@ class BBSBotApp:
         username_match = re.search(r'From (.+?) ', clean_line)
         if username_match:
             username = username_match.group(1)
-            if self.is_spamming(username):
+            # Skip spam detection for the bot itself
+            if username != self.bot_username and self.is_spamming(username):
                 self.block_user(username)
                 return
 
@@ -1718,7 +1720,7 @@ class BBSBotApp:
                     self.store_public_message(sender, message)
 
                     # Ignore messages from Ultron (the bot itself).
-                    if sender.lower() == "ultron":
+                    if sender.lower() == self.bot_username.lower():
                         return
 
                     # Ignore messages from blocked users.
