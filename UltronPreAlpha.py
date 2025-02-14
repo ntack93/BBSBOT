@@ -1827,6 +1827,10 @@ class BBSBotApp:
 
     def is_spamming(self, username):
         """Check if the user is spamming the bot."""
+        # Skip spam detection for the bot itself
+        if username == self.bot_username:
+            return False
+
         current_time = time.time()
         if username not in self.spam_tracker:
             self.spam_tracker[username] = []
