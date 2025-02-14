@@ -1116,18 +1116,20 @@ class BBSBotApp:
         if not key:
             return "Weather API key is missing."
 
-        # Split args into command and location
-        parts = args.strip().split(maxsplit=1)
-        if len(parts) < 2:
-            return "Usage: !weather <current/forecast> <city or zip>"
+        # Split args into command, city, and state
+        parts = args.strip().split(maxsplit=3)
+        if len(parts) < 3:
+            return "Usage: !weather <current/forecast> <city> <state>"
 
-        command, location = parts
+        command, city, state = parts[0], parts[1], parts[2]
 
         if command.lower() not in ['current', 'forecast']:
             return "Please specify either 'current' or 'forecast' as the first argument."
 
-        if not location:
-            return "Please specify a city or zip code."
+        if not city or not state:
+            return "Please specify both city and state."
+
+        location = f"{city},{state}"
 
         if command.lower() == 'current':
             # Get current weather
@@ -1152,7 +1154,7 @@ class BBSBotApp:
                 precipitation = data.get("rain", {}).get("1h", 0) + data.get("snow", {}).get("1h", 0)
 
                 return (
-                    f"Current weather in {location.title()}: {desc}, {temp_f:.1f}°F "
+                    f"Current weather in {city.title()}, {state.upper()}: {desc}, {temp_f:.1f}°F "
                     f"(feels like {feels_like:.1f}°F), Humidity {humidity}%, Wind {wind_speed} mph, "
                     f"Precipitation {precipitation} mm."
                 )
@@ -1188,7 +1190,7 @@ class BBSBotApp:
                         forecasts.append(f"{time.strftime('%A', time.localtime(item['dt']))}: {desc}, {temp:.1f}°F")
 
                 return (
-                    f"3-day forecast for {location.title()}: " + 
+                    f"3-day forecast for {city.title()}, {state.upper()}: " + 
                     ", ".join(forecasts)
                 )
             except requests.exceptions.RequestException as e:
