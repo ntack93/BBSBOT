@@ -17,9 +17,6 @@ from pytube import YouTube
 from pydub import AudioSegment
 import subprocess
 from openai import OpenAI
-import smtplib
-from email.mime.text import MIMEText
-import shlex
 
 # Load API keys from api_keys.json
 def load_api_keys():
@@ -132,9 +129,6 @@ class BBSBotApp:
         self.pending_messages_table_name = 'PendingMessages'
         self.create_pending_messages_table()
         self.openai_client = OpenAI(api_key=self.openai_api_key.get())
-        self.spam_tracker = {}  # Dictionary to track user messages and timestamps
-        self.blocked_users = set()  # Set to keep track of blocked users
-        self.bot_username = "Ultron"  # Add bot's username
 
     def create_dynamodb_table(self):
         """Create DynamoDB table if it doesn't exist."""
@@ -236,15 +230,11 @@ class BBSBotApp:
 
     def get_pending_messages(self, recipient):
         """Retrieve pending messages for a recipient from DynamoDB."""
-        try:
-            pending_messages_table = dynamodb.Table(self.pending_messages_table_name)
-            response = pending_messages_table.query(
-                KeyConditionExpression=boto3.dynamodb.conditions.Key('recipient').eq(recipient.lower())
-            )
-            return response.get('Items', [])
-        except Exception as e:
-            print(f"Error retrieving pending messages for {recipient}: {e}")
-            return []
+        pending_messages_table = dynamodb.Table(self.pending_messages_table_name)
+        response = pending_messages_table.query(
+            KeyConditionExpression=boto3.dynamodb.conditions.Key('recipient').eq(recipient.lower())
+        )
+        return response.get('Items', [])
 
     def delete_pending_message(self, recipient, timestamp):
         """Delete a pending message from DynamoDB."""
@@ -587,17 +577,9 @@ class BBSBotApp:
     def toggle_connection(self):
         """Connect or disconnect from the BBS."""
         if self.connected:
-            asyncio.run_coroutine_threadsafe(self.send_exit_command(), self.loop).result()
+            asyncio.run_coroutine_threadsafe(self.disconnect_from_bbs(), self.loop).result()
         else:
             self.start_connection()
-
-    async def send_exit_command(self):
-        """Send '=x' command to the BBS to disconnect."""
-        if self.connected and self.writer:
-            self.writer.write("=x\r\n")
-            await self.writer.drain()
-            self.msg_queue.put_nowait("Sent '=x' to BBS. Disconnecting...\n")
-            await self.disconnect_from_bbs()
 
     def connect_to_bbs(self, address):
         """Connect to the BBS with the given address."""
@@ -738,10 +720,6 @@ class BBSBotApp:
 
         # Process all but the last entry; that last might be incomplete
         for line in lines[:-1]:
-            # Check if the line contains a message from a blocked user
-            if any(blocked_user in line for blocked_user in self.blocked_users):
-                continue
-
             self.append_terminal_text(line + "\n", "normal")
             print(f"Incoming line: {line}")  # Log each incoming line
             self.parse_incoming_triggers(line)
@@ -972,8 +950,8 @@ class BBSBotApp:
         """
         response = "Unknown command."  # Initialize response with a default value
         if "!weather" in message:
-            args = message.split("!weather", 1)[1].strip()
-            response = self.get_weather_response(args)
+            location = message.split("!weather", 1)[1].strip()
+            response = self.get_weather_response(location)
         elif "!yt" in message:
             query = message.split("!yt", 1)[1].strip()
             response = self.get_youtube_response(query)
@@ -1018,9 +996,6 @@ class BBSBotApp:
             episode = parts[2]
             self.handle_pod_command(username, show, episode)
             return
-        elif "!mail" in message:
-            self.handle_mail_command(message)
-            return  # Exit early to avoid sending a response twice
         else:
             # Assume it's a message for the !chat trigger
             response = self.get_chatgpt_response(message, username=username)
@@ -1035,8 +1010,8 @@ class BBSBotApp:
         """
         response = None  # Initialize response with None
         if "!weather" in message:
-            args = message.split("!weather", 1)[1].strip()
-            response = self.get_weather_response(args)
+            location = message.split("!weather", 1)[1].strip()
+            response = self.get_weather_response(location)
         elif "!yt" in message:
             query = message.split("!yt", 1)[1].strip()
             response = self.get_youtube_response(query)
@@ -1085,9 +1060,6 @@ class BBSBotApp:
             episode = parts[2]
             self.handle_pod_command(username, show, episode, is_page=True, module_or_channel=module_or_channel)
             return
-        elif "!mail" in message:
-            self.handle_mail_command(message)
-            return  # Exit early to avoid sending a response twice
 
         if response:
             self.send_page_response(username, module_or_channel, response)
@@ -1123,12 +1095,6 @@ class BBSBotApp:
             episode = parts[2]
             self.handle_pod_command(username, show, episode)
             return
-        elif "!weather" in message:
-            args = message.split("!weather", 1)[1].strip()
-            response = self.get_weather_response(args)
-        elif "!mail" in message:
-            self.handle_mail_command(message)
-            return  # Exit early to avoid sending a response twice
         else:
             response = self.get_chatgpt_response(message, direct=True, username=username)
 
@@ -1144,28 +1110,14 @@ class BBSBotApp:
             asyncio.run_coroutine_threadsafe(self._send_message(full_message + "\r\n"), self.loop)
             self.append_terminal_text(full_message + "\n", "normal")
 
-
-    def get_weather_response(self, args):
+    def get_weather_response(self, location):
         """Fetch weather info and return the response as a string."""
         key = self.weather_api_key.get()
         if not key:
             return "Weather API key is missing."
-
-        # Split args into command and location
-        parts = args.strip().split(maxsplit=1)
-        if len(parts) < 2:
-            return "Usage: !weather <current/forecast> <city or zip>"
-
-        command, location = parts
-
-        if command.lower() not in ['current', 'forecast']:
-            return "Please specify either 'current' or 'forecast' as the first argument."
-
-        if not location:
+        elif not location:
             return "Please specify a city or zip code."
-
-        if command.lower() == 'current':
-            # Get current weather
+        else:
             url = "http://api.openweathermap.org/data/2.5/weather"
             params = {
                 "q": location,
@@ -1174,58 +1126,23 @@ class BBSBotApp:
             }
             try:
                 r = requests.get(url, params=params, timeout=10)
-                r.raise_for_status()
+                r.raise_for_status()  # Raise an HTTPError for bad responses
                 data = r.json()
                 if data.get("cod") != 200:
                     return f"Could not get weather for '{location}'."
-                
-                desc = data["weather"][0]["description"]
-                temp_f = data["main"]["temp"]
-                feels_like = data["main"]["feels_like"]
-                humidity = data["main"]["humidity"]
-                wind_speed = data["wind"]["speed"]
-                precipitation = data.get("rain", {}).get("1h", 0) + data.get("snow", {}).get("1h", 0)
+                else:
+                    desc = data["weather"][0]["description"]
+                    temp_f = data["main"]["temp"]
+                    feels_like = data["main"]["feels_like"]
+                    humidity = data["main"]["humidity"]
+                    wind_speed = data["wind"]["speed"]
+                    precipitation = data.get("rain", {}).get("1h", 0) + data.get("snow", {}).get("1h", 0)
 
-                return (
-                    f"Current weather in {location.title()}: {desc}, {temp_f:.1f}°F "
-                    f"(feels like {feels_like:.1f}°F), Humidity {humidity}%, Wind {wind_speed} mph, "
-                    f"Precipitation {precipitation} mm."
-                )
-            except requests.exceptions.RequestException as e:
-                return f"Error fetching weather: {str(e)}"
-
-        else:  # forecast
-            # Get 5-day forecast
-            url = "http://api.openweathermap.org/data/2.5/forecast"
-            params = {
-                "q": location,
-                "appid": key,
-                "units": "imperial"
-            }
-            try:
-                r = requests.get(url, params=params, timeout=10)
-                r.raise_for_status()
-                data = r.json()
-                if data.get("cod") != "200":
-                    return f"Could not get forecast for '{location}'."
-
-                # Get next 3 days forecast (excluding today)
-                forecasts = []
-                current_date = None
-                for item in data['list']:
-                    date = time.strftime('%Y-%m-%d', time.localtime(item['dt']))
-                    if date == time.strftime('%Y-%m-%d'):  # Skip today
-                        continue
-                    if date != current_date and len(forecasts) < 3:  # Get next 3 days
-                        current_date = date
-                        temp = item['main']['temp']
-                        desc = item['weather'][0]['description']
-                        forecasts.append(f"{time.strftime('%A', time.localtime(item['dt']))}: {desc}, {temp:.1f}°F")
-
-                return (
-                    f"3-day forecast for {location.title()}: " + 
-                    ", ".join(forecasts)
-                )
+                    return (
+                        f"Weather in {location.title()}: {desc}, {temp_f:.1f}°F "
+                        f"(feels like {feels_like:.1f}°F), Humidity {humidity}%, Wind {wind_speed} mph, "
+                        f"Precipitation {precipitation} mm."
+                    )
             except requests.exceptions.RequestException as e:
                 return f"Error fetching weather: {str(e)}"
 
@@ -1271,8 +1188,7 @@ class BBSBotApp:
                 "num": 1  # just one top result
             }
             try:
-                r = requests.get(url, params=params, timeout=10)
-                r.raise_for_status()  # Raise an HTTPError for bad responses
+                r = requests.get(url, params=params)
                 data = r.json()
                 items = data.get("items", [])
                 if not items:
@@ -1289,7 +1205,7 @@ class BBSBotApp:
                         f"Snippet: {snippet}\n"
                         f"Link: {link}"
                     )
-            except requests.exceptions.RequestException as e:
+            except Exception as e:
                 return f"Error with Google search: {str(e)}"
 
     def get_chatgpt_response(self, user_text, direct=False, username=None):
@@ -1427,7 +1343,7 @@ class BBSBotApp:
             "Available commands: Please use a ! immediately followed by one of the following keywords (no space): "
             "weather <location>, yt <query>, search <query>, chat <message>, news <topic>, map <place>, pic <query>, "
             "polly <voice> <text>, mp3yt <youtube link>, help, seen <username>, greeting, stocks <symbol>, "
-            "crypto <symbol>, timer <value> <minutes or seconds>, gif <query>, msg <username> <message>, doc <query>, pod <show> <episode>, !trump, nospam, mail (enclose each section in quotes) <recipient> <subject> <body>.\n"
+            "crypto <symbol>, timer <value> <minutes or seconds>, gif <query>, msg <username> <message>, doc <query>, pod <show> <episode>, !trump, nospam.\n"
         )
 
     def append_terminal_text(self, text, default_tag="normal"):
@@ -1710,19 +1626,6 @@ class BBSBotApp:
         ansi_escape_regex = re.compile(r'\x1b\[(.*?)m')
         clean_line = ansi_escape_regex.sub('', line)
 
-        # First, check if the message is from a user who is spamming.
-        username_match = re.search(r'From (.+?) ', clean_line)
-        if username_match:
-            username = username_match.group(1)
-            # Skip spam detection for the bot itself
-            if username != self.bot_username and self.is_spamming(username):
-                self.block_user(username)
-                return
-
-        # Then (if you really want to ignore non-spam messages from @din.asciiattic.com):
-        if re.search(r'@din\.asciiattic\.com', clean_line):
-            return
-
         # Always allow the !nospam command to toggle state
         if "!nospam" in clean_line:
             # Toggle and persist the new state
@@ -1734,22 +1637,18 @@ class BBSBotApp:
 
         # Detect message types
         private_message_match = re.match(r'From (.+?) \(whispered\): (.+)', clean_line)
-        page_message_match = re.match(r'(.+?) is paging you (?:from|via) (.+?): (.+)', clean_line)
+        page_message_match = re.match(r'(.+?) is paging you from (.+?): (.+)', clean_line)
         direct_message_match = re.match(r'From (.+?) \(to you\): (.+)', clean_line)
 
         # If !nospam is ON, only allow whispered and paging messages.
         if self.no_spam_mode.get() and not (private_message_match or page_message_match):
+            self.append_terminal_text("Ignored trigger due to No Spam Mode.\n", "normal")
             return
 
         # Process private messages
         if private_message_match:
             username = private_message_match.group(1)
             message = private_message_match.group(2)
-            if username in self.blocked_users:
-                return
-            if self.is_spamming(username):
-                self.block_user(username)
-                return
             self.handle_private_trigger(username, message)
         else:
             # Process page commands
@@ -1757,21 +1656,11 @@ class BBSBotApp:
                 username = page_message_match.group(1)
                 module_or_channel = page_message_match.group(2)
                 message = page_message_match.group(3)
-                if username in self.blocked_users:
-                    return
-                if self.is_spamming(username):
-                    self.block_user(username, is_page=True, module_or_channel=module_or_channel)
-                    return
                 self.handle_page_trigger(username, module_or_channel, message)
             # Process direct messages (only if !nospam is OFF)
             elif direct_message_match:
                 username = direct_message_match.group(1)
                 message = direct_message_match.group(2)
-                if username in self.blocked_users:
-                    return
-                if self.is_spamming(username):
-                    self.block_user(username)
-                    return
                 self.handle_direct_message(username, message)
             else:
                 # Process known commands.
@@ -1784,153 +1673,108 @@ class BBSBotApp:
                     self.store_public_message(sender, message)
 
                     # Ignore messages from Ultron (the bot itself).
-                    if sender.lower() == self.bot_username.lower():
-                        return
-
-                    # Ignore messages from blocked users.
-                    if sender in self.blocked_users:
+                    if sender.lower() == "ultron":
                         return
 
                     # Only process messages that begin with a recognized command.
                     valid_commands = [
                         "!weather", "!yt", "!search", "!chat", "!news", "!map",
                         "!pic", "!polly", "!mp3yt", "!help", "!seen", "!greeting",
-                        "!stocks", "!crypto", "!timer", "!gif", "!msg", "!doc", "!pod", "!said", "!trump", "!mail"
+                        "!stocks", "!crypto", "!timer", "!gif", "!msg", "!doc", "!pod", "!said", "!trump"
                     ]
                     if not any(message.startswith(cmd) for cmd in valid_commands):
                         return
 
                     # Process recognized commands.
-                    response = None  # Initialize response with None
-                    if message.startswith("!mail"):
-                        self.handle_mail_command(message)
-                        return  # Exit early to avoid sending a response twice
                     if message.startswith("!weather"):
-                        args = message.split("!weather", 1)[1].strip()
-                        response = self.get_weather_response(args)
+                        location = message.split("!weather", 1)[1].strip()
+                        self.send_full_message(self.get_weather_response(location))
                     elif message.startswith("!yt"):
                         query = message.split("!yt", 1)[1].strip()
-                        response = self.get_youtube_response(query)
+                        self.send_full_message(self.get_youtube_response(query))
                     elif message.startswith("!search"):
                         query = message.split("!search", 1)[1].strip()
-                        response = self.get_web_search_response(query)
+                        self.send_full_message(self.get_web_search_response(query))
                     elif message.startswith("!chat"):
                         query = message.split("!chat", 1)[1].strip()
-                        response = self.get_chatgpt_response(query, username=sender)
+                        self.send_full_message(self.get_chatgpt_response(query, username=sender))
                     elif message.startswith("!news"):
                         topic = message.split("!news", 1)[1].strip()
-                        response = self.get_news_response(topic)
+                        self.send_full_message(self.get_news_response(topic))
                     elif message.startswith("!map"):
                         place = message.split("!map", 1)[1].strip()
-                        response = self.get_map_response(place)
+                        self.send_full_message(self.get_map_response(place))
                     elif message.startswith("!pic"):
                         query = message.split("!pic", 1)[1].strip()
-                        response = self.get_pic_response(query)
+                        self.send_full_message(self.get_pic_response(query))
                     elif message.startswith("!polly"):
                         parts = message.split(maxsplit=2)
                         if len(parts) < 3:
-                            self.send_full_message("Usage: !polly <voice> <text>")
-                            return
-                        voice = parts[1]
-                        text = parts[2]
-                        self.handle_polly_command(voice, text)
-                        return  # Exit early to avoid sending a response twice
+                            self.send_full_message("Usage: !polly <voice> <text> - Voices are Ruth, Joanna, Danielle, Matthew, Stephen")
+                        else:
+                            voice = parts[1]
+                            text = parts[2]
+                            self.handle_polly_command(voice, text)
                     elif message.startswith("!mp3yt"):
                         url = message.split("!mp3yt", 1)[1].strip()
                         self.handle_ytmp3_command(url)
-                        return  # Exit early to avoid sending a response twice
                     elif message.startswith("!help"):
-                        response = self.get_help_response()
+                        self.send_full_message(self.get_help_response())
                     elif message.startswith("!seen"):
                         target_username = message.split("!seen", 1)[1].strip()
-                        response = self.get_seen_response(target_username)
+                        self.send_full_message(self.get_seen_response(target_username))
                     elif message.startswith("!greeting"):
                         self.handle_greeting_command()
-                        return  # Exit early to avoid sending a response twice
                     elif message.startswith("!stocks"):
                         symbol = message.split("!stocks", 1)[1].strip()
-                        response = self.get_stock_price(symbol)
+                        self.send_full_message(self.get_stock_price(symbol))
                     elif message.startswith("!crypto"):
                         crypto = message.split("!crypto", 1)[1].strip()
-                        response = self.get_crypto_price(crypto)
+                        self.send_full_message(self.get_crypto_price(crypto))
                     elif message.startswith("!timer"):
                         parts = message.split(maxsplit=3)
                         if len(parts) < 3:
                             self.send_full_message("Usage: !timer <value> <minutes or seconds>")
-                            return
-                        value = parts[1]
-                        unit = parts[2]
-                        self.handle_timer_command(sender, value, unit)
-                        return  # Exit early to avoid sending a response twice
+                        else:
+                            value = parts[1]
+                            unit = parts[2]
+                            self.handle_timer_command(sender, value, unit)
                     elif message.startswith("!gif"):
                         query = message.split("!gif", 1)[1].strip()
-                        response = self.get_gif_response(query)
+                        self.send_full_message(self.get_gif_response(query))
                     elif message.startswith("!msg"):
                         parts = message.split(maxsplit=2)
                         if len(parts) < 3:
                             self.send_full_message("Usage: !msg <username> <message>")
-                            return
-                        recipient = parts[1]
-                        msg = parts[2]
-                        self.handle_msg_command(recipient, msg, sender)
-                        return  # Exit early to avoid sending a response twice
+                        else:
+                            recipient = parts[1]
+                            msg = parts[2]
+                            self.handle_msg_command(recipient, msg, sender)
                     elif message.startswith("!doc"):
                         query = message.split("!doc", 1)[1].strip()
                         self.handle_doc_command(query, sender, public=True)
-                        return  # Exit early to avoid sending a response twice
                     elif message.startswith("!pod"):
                         parts = message.split(maxsplit=2)
                         if len(parts) < 3:
                             self.send_full_message("Usage: !pod <show> <episode name or number>")
-                            return
-                        show = parts[1]
-                        episode = parts[2]
-                        self.handle_pod_command(sender, show, episode)
-                        return  # Exit early to avoid sending a response twice
+                        else:
+                            show = parts[1]
+                            episode = parts[2]
+                            self.handle_pod_command(sender, show, episode)
                     elif message.startswith("!said"):
                         self.handle_said_command(sender, message)
-                        return  # Exit early to avoid sending a response twice
+                        return
                     elif message.startswith("!trump"):
-                        response = self.get_trump_post()
-
-                    if response:
-                        self.send_full_message(response)
+                        trump_text = self.get_trump_post()
+                        chunks = self.chunk_message(trump_text, 250)
+                        for chunk in chunks:
+                            self.send_full_message(chunk)
+                        return
 
         # Update the previous line
         self.previous_line = clean_line
 
-    def is_spamming(self, username):
-        """Check if the user is spamming the bot."""
-        # Skip spam detection for the bot itself
-        if username == self.bot_username:
-            return False
-
-        current_time = time.time()
-        if username not in self.spam_tracker:
-            self.spam_tracker[username] = []
-        self.spam_tracker[username].append(current_time)
-
-        # Remove timestamps older than 5 seconds
-        self.spam_tracker[username] = [t for t in self.spam_tracker[username] if current_time - t <= 5]
-
-        # Check if there are 3 or more messages within 5 seconds
-        if len(self.spam_tracker[username]) >= 3:
-            print(f"[DEBUG] Spam detected from {username}: {self.spam_tracker[username]}")  # Debug log
-            return True
-        return False
-
-    def block_user(self, username, is_page=False, module_or_channel=None):
-        """Block the user by sending the appropriate command."""
-        self.blocked_users.add(username)
-        if is_page:
-            block_command = f"/p ignore {username}"
-        else:
-            block_command = f"forget {username}"
-        self.send_full_message(f"User {username} has been blocked for spamming.")
-        asyncio.run_coroutine_threadsafe(self._send_message(block_command + "\r\n"), self.loop)
-        # Clear the user's spam timestamps to avoid repeated blocks
-        if username in self.spam_tracker:
-            del self.spam_tracker[username]
+    
 
     def send_private_message(self, username, message):
         """
@@ -2211,13 +2055,13 @@ class BBSBotApp:
             response = self.get_chatgpt_response(greeting_message, direct=True, username=new_member_username)
             self.send_direct_message(new_member_username, response)
 
-    def get_pic_response(self, query):
+    def handle_pic_command(self, query):
         """Fetch a random picture from Pexels based on the query."""
         key = self.pexels_api_key.get()
         if not key:
-            return "Pexels API key is missing."
+            response = "Pexels API key is missing."
         elif not query:
-            return "Please specify a query."
+            response = "Please specify a query."
         else:
             url = "https://api.pexels.com/v1/search"
             headers = {
@@ -2234,42 +2078,16 @@ class BBSBotApp:
                 data = r.json()
                 photos = data.get("photos", [])
                 if not photos:
-                    return f"No pictures found for '{query}'."
+                    response = f"No pictures found for '{query}'."
                 else:
                     photo = photos[0]
                     photographer = photo.get("photographer", "Unknown")
                     src = photo.get("src", {}).get("original", "No URL")
-                    return f"Photo by {photographer}: {src}"
+                    response = f"Photo by {photographer}: {src}"
             except requests.exceptions.RequestException as e:
-                return f"Error fetching picture: {str(e)}"
+                response = f"Error fetching picture: {str(e)}"
 
-    def get_gif_response(self, query):
-        """Fetch a popular GIF based on the query and return a string response."""
-        key = self.giphy_api_key.get()
-        if not key:
-            return "Giphy API key is missing."
-        elif not query:
-            return "Please specify a query."
-        else:
-            url = "https://api.giphy.com/v1/gifs/search"
-            params = {
-                "api_key": key,
-                "q": query,
-                "limit": 1,
-                "rating": "g"
-            }
-            try:
-                r = requests.get(url, params=params, timeout=10)
-                r.raise_for_status()  # Raise an HTTPError for bad responses
-                data = r.json()
-                gifs = data.get("data", [])
-                if not gifs:
-                    return f"No GIFs found for '{query}'."
-                else:
-                    gif_url = gifs[0].get("url", "No URL")
-                    return f"GIF for '{query}': {gif_url}"
-            except requests.exceptions.RequestException as e:
-                return f"Error fetching GIF: {str(e)}"
+        self.send_full_message(response)
 
     def refresh_membership(self):
         """Refresh the membership list by sending an ENTER keystroke and allowing time for processing."""
@@ -2510,7 +2328,7 @@ class BBSBotApp:
         self.timers[timer_id] = self.master.after(duration * 1000, timer_callback)
         self.send_full_message(f"Timer set for {username} for {value} {unit}.")
 
-    def get_gif_response(self, query):
+    def handle_gif_command(self, query):
         """Fetch a popular GIF based on the query."""
         key = self.giphy_api_key.get()
         if not key:
@@ -2760,8 +2578,8 @@ class BBSBotApp:
         """
         response = None  # Initialize response with None
         if "!weather" in message:
-            args = message.split("!weather", 1)[1].strip()
-            response = self.get_weather_response(args)
+            location = message.split("!weather", 1)[1].strip()
+            response = self.get_weather_response(location)
         elif "!yt" in message:
             query = message.split("!yt", 1)[1].strip()
             response = self.get_youtube_response(query)
@@ -2807,11 +2625,6 @@ class BBSBotApp:
             episode = parts[2]
             self.handle_pod_command(username, show, episode)
             return
-        elif "!trump" in message:
-            response = self.get_trump_post()
-        elif "!mail" in message:
-            self.handle_mail_command(message)
-            return  # Exit early to avoid sending a response twice
 
         if response:
             self.send_full_message(response)
@@ -2883,7 +2696,7 @@ class BBSBotApp:
                 sys.executable,
                 r"C:\Users\Noah\OneDrive\Documents\bbschatbot1.0\TrumpsLatestPostScraper.py"
             ]
-            result = subprocess.run(command, capture_output=True, text=True, timeout=180)
+            result = subprocess.run(command, capture_output=True, text=True, encoding='utf-8', errors='ignore', timeout=180)
             output = result.stdout.strip()
 
             if result.returncode != 0:
@@ -2891,74 +2704,14 @@ class BBSBotApp:
                 error_msg = result.stderr.strip() or "Unknown error from Trump scraper."
                 return f"Error from Trump post script: {error_msg}"
 
-            # Parse lines for “Latest Post:” and “Posted on:”
-            post_content = None
-            post_time = None
-            for line in output.splitlines():
-                if "Latest Post:" in line:
-                    post_content = line.replace("Latest Post:", "").strip()
-                elif "Posted on:" in line:
-                    post_time = line.replace("Posted on:", "").strip()
-                elif "No recent post found" in line:
-                    return "No recent post found on Truth Social."
-
-            if post_content and post_time:
-                return f"Trump’s latest post (posted on {post_time}): {post_content}"
+            # Split the output into lines and get the last two lines
+            lines = output.splitlines()
+            if len(lines) >= 2:
+                return "\n".join(lines[-2:])
             else:
-                return "Could not parse Trump’s latest Truth Social post."
+                return output
         except Exception as e:
             return f"Error running Trump post script: {str(e)}"
-
-    def load_email_credentials(self):
-        """Load email credentials from a file."""
-        if os.path.exists("email_credentials.json"):
-            with open("email_credentials.json", "r") as file:
-                return json.load(file)
-        return {}
-
-    def send_email(self, recipient, subject, body):
-        """Send an email using Gmail."""
-        credentials = self.load_email_credentials()
-        smtp_server = credentials.get("smtp_server", "smtp.gmail.com")
-        smtp_port = credentials.get("smtp_port", 587)
-        sender_email = credentials.get("sender_email")
-        sender_password = credentials.get("sender_password")
-
-        if not sender_email or not sender_password:
-            return "Email credentials are missing."
-
-        try:
-            msg = MIMEText(body)
-            msg["Subject"] = subject
-            msg["From"] = sender_email
-            msg["To"] = recipient
-
-            with smtplib.SMTP(smtp_server, smtp_port) as server:
-                server.ehlo()
-                server.starttls()
-                server.ehlo()
-                server.login(sender_email, sender_password)
-                server.sendmail(sender_email, [recipient], msg.as_string())
-
-            return f"Email sent to {recipient} successfully."
-        except Exception as e:
-            return f"Error sending email: {str(e)}"
-
-    def handle_mail_command(self, command_text):
-        """Handle the !mail command to send an email."""
-        try:
-            parts = shlex.split(command_text)
-            if len(parts) < 4:
-                self.send_full_message("Usage: !mail \"recipient@example.com\" \"Subject\" \"Body\"")
-                return
-
-            recipient = parts[1]
-            subject = parts[2]
-            body = parts[3]
-            response = self.send_email(recipient, subject, body)
-            self.send_full_message(response)
-        except ValueError as e:
-            self.send_full_message(f"Error parsing command: {str(e)}")
 
 def main():
     app = None  # Ensure app is defined
