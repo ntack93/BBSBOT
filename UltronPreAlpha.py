@@ -1110,14 +1110,27 @@ class BBSBotApp:
             asyncio.run_coroutine_threadsafe(self._send_message(full_message + "\r\n"), self.loop)
             self.append_terminal_text(full_message + "\n", "normal")
 
-    def get_weather_response(self, location):
+    def get_weather_response(self, args):
         """Fetch weather info and return the response as a string."""
         key = self.weather_api_key.get()
         if not key:
             return "Weather API key is missing."
-        elif not location:
+
+        # Split args into command and location
+        parts = args.strip().split(maxsplit=1)
+        if len(parts) < 2:
+            return "Usage: !weather <current/forecast> <city or zip>"
+
+        command, location = parts
+
+        if command.lower() not in ['current', 'forecast']:
+            return "Please specify either 'current' or 'forecast' as the first argument."
+
+        if not location:
             return "Please specify a city or zip code."
-        else:
+
+        if command.lower() == 'current':
+            # Get current weather
             url = "http://api.openweathermap.org/data/2.5/weather"
             params = {
                 "q": location,
@@ -1126,23 +1139,58 @@ class BBSBotApp:
             }
             try:
                 r = requests.get(url, params=params, timeout=10)
-                r.raise_for_status()  # Raise an HTTPError for bad responses
+                r.raise_for_status()
                 data = r.json()
                 if data.get("cod") != 200:
                     return f"Could not get weather for '{location}'."
-                else:
-                    desc = data["weather"][0]["description"]
-                    temp_f = data["main"]["temp"]
-                    feels_like = data["main"]["feels_like"]
-                    humidity = data["main"]["humidity"]
-                    wind_speed = data["wind"]["speed"]
-                    precipitation = data.get("rain", {}).get("1h", 0) + data.get("snow", {}).get("1h", 0)
+                
+                desc = data["weather"][0]["description"]
+                temp_f = data["main"]["temp"]
+                feels_like = data["main"]["feels_like"]
+                humidity = data["main"]["humidity"]
+                wind_speed = data["wind"]["speed"]
+                precipitation = data.get("rain", {}).get("1h", 0) + data.get("snow", {}).get("1h", 0)
 
-                    return (
-                        f"Weather in {location.title()}: {desc}, {temp_f:.1f}°F "
-                        f"(feels like {feels_like:.1f}°F), Humidity {humidity}%, Wind {wind_speed} mph, "
-                        f"Precipitation {precipitation} mm."
-                    )
+                return (
+                    f"Current weather in {location.title()}: {desc}, {temp_f:.1f}°F "
+                    f"(feels like {feels_like:.1f}°F), Humidity {humidity}%, Wind {wind_speed} mph, "
+                    f"Precipitation {precipitation} mm."
+                )
+            except requests.exceptions.RequestException as e:
+                return f"Error fetching weather: {str(e)}"
+
+        else:  # forecast
+            # Get 5-day forecast
+            url = "http://api.openweathermap.org/data/2.5/forecast"
+            params = {
+                "q": location,
+                "appid": key,
+                "units": "imperial"
+            }
+            try:
+                r = requests.get(url, params=params, timeout=10)
+                r.raise_for_status()
+                data = r.json()
+                if data.get("cod") != "200":
+                    return f"Could not get forecast for '{location}'."
+
+                # Get next 3 days forecast (excluding today)
+                forecasts = []
+                current_date = None
+                for item in data['list']:
+                    date = time.strftime('%Y-%m-%d', time.localtime(item['dt']))
+                    if date == time.strftime('%Y-%m-%d'):  # Skip today
+                        continue
+                    if date != current_date and len(forecasts) < 3:  # Get next 3 days
+                        current_date = date
+                        temp = item['main']['temp']
+                        desc = item['weather'][0]['description']
+                        forecasts.append(f"{time.strftime('%A', time.localtime(item['dt']))}: {desc}, {temp:.1f}°F")
+
+                return (
+                    f"3-day forecast for {location.title()}: " + 
+                    ", ".join(forecasts)
+                )
             except requests.exceptions.RequestException as e:
                 return f"Error fetching weather: {str(e)}"
 
