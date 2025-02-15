@@ -1354,10 +1354,6 @@ class BBSBotApp:
         print(f"[DEBUG] ChatGPT response: {gpt_response}")  # Log ChatGPT response
         return gpt_response
 
-    
-
-    
-
     def get_map_response(self, place):
         """Fetch place info from Google Places API and return the response as a string."""
         key = self.google_places_api_key.get()
@@ -1814,13 +1810,7 @@ class BBSBotApp:
                         query = message.split("!doc", 1)[1].strip()
                         self.handle_doc_command(query, sender, public=True)
                     elif message.startswith("!pod"):
-                        parts = message.split(maxsplit=2)
-                        if len(parts) < 3:
-                            self.send_full_message("Usage: !pod <show> <episode name or number>")
-                        else:
-                            show = parts[1]
-                            episode = parts[2]
-                            self.handle_pod_command(sender, show, episode)
+                        self.handle_pod_command(sender, message)
                     elif message.startswith("!said"):
                         self.handle_said_command(sender, message)
                         return
@@ -2679,13 +2669,7 @@ class BBSBotApp:
             self.handle_said_command(username, message)
             return
         elif "!pod" in message:
-            parts = message.split(maxsplit=2)
-            if len(parts) < 3:
-                self.send_full_message("Usage: !pod <show> <episode name or number>")
-                return
-            show = parts[1]
-            episode = parts[2]
-            self.handle_pod_command(username, show, episode)
+            self.handle_pod_command(username, message)
             return
         elif "!mail" in message:
             self.handle_mail_command(message)
@@ -2693,8 +2677,19 @@ class BBSBotApp:
         if response:
             self.send_full_message(response)
 
-    def handle_pod_command(self, sender, show, episode, is_page=False, module_or_channel=None):
+    def handle_pod_command(self, sender, command_text, is_page=False, module_or_channel=None):
         """Handle the !pod command to fetch podcast episode details."""
+        match = re.match(r'!pod\s+"([^"]+)"\s+"([^"]+)"', command_text)
+        if not match:
+            response = 'Usage: !pod "<show>" "<episode name or number>"'
+            if is_page and module_or_channel:
+                self.send_page_response(sender, module_or_channel, response)
+            else:
+                self.send_full_message(response)
+            return
+
+        show = match.group(1)
+        episode = match.group(2)
         response = self.get_podcast_response(show, episode)
         if is_page and module_or_channel:
             self.send_page_response(sender, module_or_channel, response)
@@ -2827,6 +2822,36 @@ class BBSBotApp:
             self.send_full_message(response)
         except ValueError as e:
             self.send_full_message(f"Error parsing command: {str(e)}")
+
+    def get_pic_response(self, query):
+        """Fetch a random picture from Pexels based on the query."""
+        key = self.pexels_api_key.get()
+        if not key:
+            return "Pexels API key is missing."
+        elif not query:
+            return "Please specify a query."
+        else:
+            url = "https://api.pexels.com/v1/search"
+            headers = {
+                "Authorization": key
+            }
+            params = {
+                "query": query,
+                "per_page": 1,
+                "page": 1
+            }
+            try:
+                r = requests.get(url, headers=headers, params=params, timeout=10)
+                r.raise_for_status()  # Raise an HTTPError for bad responses
+                data = r.json()
+                photos = data.get("photos", [])
+                if not photos:
+                    return f"No pictures found for '{query}'."
+                else:
+                    photo_url = photos[0]["src"]["original"]
+                    return f"Here is a picture of {query}: {photo_url}"
+            except requests.exceptions.RequestException as e:
+                return f"Error fetching picture: {str(e)}"
 
 def main():
     app = None  # Ensure app is defined
