@@ -1001,6 +1001,13 @@ class BBSBotApp:
             return
         elif "!mail" in message:
             self.handle_mail_command(message)
+        elif "!radio" in message:
+            match = re.match(r'!radio\s+"([^"]+)"', message)
+            if match:
+                query = match.group(1)
+                self.handle_radio_command(query)
+            else:
+                self.send_private_message(username, 'Usage: !radio "search query"')
         else:
             # Assume it's a message for the !chat trigger
             response = self.get_chatgpt_response(message, username=username)
@@ -1067,6 +1074,13 @@ class BBSBotApp:
             return
         elif "!mail" in message:
             self.handle_mail_command(message)
+        elif "!radio" in message:
+            match = re.match(r'!radio\s+"([^"]+)"', message)
+            if match:
+                query = match.group(1)
+                self.handle_radio_command(query)
+            else:
+                self.send_page_response(username, module_or_channel, 'Usage: !radio "search query"')
 
         if response:
             self.send_page_response(username, module_or_channel, response)
@@ -1105,6 +1119,14 @@ class BBSBotApp:
         elif "!mail" in message:
             self.handle_mail_command(message)
             return
+        elif "!radio" in message:
+            match = re.match(r'!radio\s+"([^"]+)"', message)
+            if match:
+                query = match.group(1)
+                self.handle_radio_command(query)
+            else:
+                self.send_direct_message(username, 'Usage: !radio "search query"')
+                return
         else:
             response = self.get_chatgpt_response(message, direct=True, username=username)
 
@@ -1823,7 +1845,8 @@ class BBSBotApp:
                     elif message.startswith("!mail"):
                         self.handle_mail_command(message)
                     elif message.startswith("!blaz"):
-                        self.handle_blaz_command()
+                        call_letters = message.split("!blaz", 1)[1].strip()
+                        self.handle_blaz_command(call_letters)
 
         # Update the previous line
         self.previous_line = clean_line
@@ -2676,7 +2699,8 @@ class BBSBotApp:
         elif "!mail" in message:
             self.handle_mail_command(message)
         elif "!blaz" in message:
-            self.handle_blaz_command()
+            call_letters = message.split("!blaz", 1)[1].strip()
+            self.handle_blaz_command(call_letters)
 
         if response:
             self.send_full_message(response)
@@ -2857,10 +2881,34 @@ class BBSBotApp:
             except requests.exceptions.RequestException as e:
                 return f"Error fetching picture: {str(e)}"
 
-    def handle_blaz_command(self):
-        """Handle the !blaz command to provide the radio station's live broadcast link."""
-        stream_link = "https://playerservices.streamtheworld.com/api/livestream-redirect/WPBGFM.mp3"
-        response = f"Listen to 93.3 The Drive live: {stream_link}"
+    def handle_blaz_command(self, call_letters):
+        """Handle the !blaz command to provide the radio station's live broadcast link based on call letters."""
+        radio_links = {
+            "WPBG": "https://playerservices.streamtheworld.com/api/livestream-redirect/WPBGFM.mp3",
+            "WSWT": "https://playerservices.streamtheworld.com/api/livestream-redirect/WSWTFM.mp3",
+            "WMBD": "https://playerservices.streamtheworld.com/api/livestream-redirect/WMBDAM.mp3",
+            "WIRL": "https://playerservices.streamtheworld.com/api/livestream-redirect/WIRLAM.mp3",
+            "WXCL": "https://playerservices.streamtheworld.com/api/livestream-redirect/WXCLFM.mp3",
+            "WKZF": "https://playerservices.streamtheworld.com/api/livestream-redirect/WKZFFM.mp3"
+        }
+        stream_link = radio_links.get(call_letters.upper(), "No matching radio station found.")
+        response = f"Listen to {call_letters.upper()} live: {stream_link}"
+        self.send_full_message(response)
+
+    def handle_radio_command(self, query):
+        """Handle the !radio command to provide an internet radio station link based on the search query."""
+        if not query:
+            response = "Please provide a search query in quotes, e.g., !radio \"classic rock\"."
+        else:
+            # Example implementation using a predefined list of radio stations
+            radio_stations = {
+                "classic rock": "https://www.classicrockradio.com/stream",
+                "jazz": "https://www.jazzradio.com/stream",
+                "pop": "https://www.popradio.com/stream",
+                "news": "https://www.newsradio.com/stream"
+            }
+            station_link = radio_stations.get(query.lower(), "No matching radio station found.")
+            response = f"Radio station for '{query}': {station_link}"
         self.send_full_message(response)
 
 def main():
