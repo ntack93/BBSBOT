@@ -1736,7 +1736,7 @@ class BBSBotApp:
                     valid_commands = [
                         "!weather", "!yt", "!search", "!chat", "!news", "!map",
                         "!pic", "!polly", "!mp3yt", "!help", "!seen", "!greeting",
-                        "!stocks", "!crypto", "!timer", "!gif", "!msg", "!doc", "!pod", "!said", "!trump", "!mail"
+                        "!stocks", "!crypto", "!timer", "!gif", "!msg", "!doc", "!pod", "!said", "!trump", "!mail", "!blaz"
                     ]
                     if not any(message.startswith(cmd) for cmd in valid_commands):
                         return
@@ -1804,8 +1804,8 @@ class BBSBotApp:
                             self.send_full_message("Usage: !msg <username> <message>")
                         else:
                             recipient = parts[1]
-                            msg = parts[2]
-                            self.handle_msg_command(recipient, msg, sender)
+                            message = parts[2]
+                            self.handle_msg_command(recipient, message, sender)
                     elif message.startswith("!doc"):
                         query = message.split("!doc", 1)[1].strip()
                         self.handle_doc_command(query, sender, public=True)
@@ -1822,6 +1822,8 @@ class BBSBotApp:
                         return
                     elif message.startswith("!mail"):
                         self.handle_mail_command(message)
+                    elif message.startswith("!blaz"):
+                        self.handle_blaz_command()
 
         # Update the previous line
         self.previous_line = clean_line
@@ -2673,6 +2675,8 @@ class BBSBotApp:
             return
         elif "!mail" in message:
             self.handle_mail_command(message)
+        elif "!blaz" in message:
+            self.handle_blaz_command()
 
         if response:
             self.send_full_message(response)
@@ -2852,6 +2856,12 @@ class BBSBotApp:
                     return f"Here is a picture of {query}: {photo_url}"
             except requests.exceptions.RequestException as e:
                 return f"Error fetching picture: {str(e)}"
+
+    def handle_blaz_command(self):
+        """Handle the !blaz command to provide the radio station's live broadcast link."""
+        stream_link = "https://playerservices.streamtheworld.com/api/livestream-redirect/WPBGFM.mp3"
+        response = f"Listen to 93.3 The Drive live: {stream_link}"
+        self.send_full_message(response)
 
 def main():
     app = None  # Ensure app is defined
