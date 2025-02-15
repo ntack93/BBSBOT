@@ -17,6 +17,9 @@ from pytube import YouTube
 from pydub import AudioSegment
 import subprocess
 from openai import OpenAI
+import smtplib
+from email.mime.text import MIMEText
+import shlex
 
 # Load API keys from api_keys.json
 def load_api_keys():
@@ -996,6 +999,8 @@ class BBSBotApp:
             episode = parts[2]
             self.handle_pod_command(username, show, episode)
             return
+        elif "!mail" in message:
+            self.handle_mail_command(message)
         else:
             # Assume it's a message for the !chat trigger
             response = self.get_chatgpt_response(message, username=username)
@@ -1060,6 +1065,8 @@ class BBSBotApp:
             episode = parts[2]
             self.handle_pod_command(username, show, episode, is_page=True, module_or_channel=module_or_channel)
             return
+        elif "!mail" in message:
+            self.handle_mail_command(message)
 
         if response:
             self.send_page_response(username, module_or_channel, response)
@@ -1094,6 +1101,9 @@ class BBSBotApp:
             show = parts[1]
             episode = parts[2]
             self.handle_pod_command(username, show, episode)
+            return
+        elif "!mail" in message:
+            self.handle_mail_command(message)
             return
         else:
             response = self.get_chatgpt_response(message, direct=True, username=username)
@@ -1730,7 +1740,7 @@ class BBSBotApp:
                     valid_commands = [
                         "!weather", "!yt", "!search", "!chat", "!news", "!map",
                         "!pic", "!polly", "!mp3yt", "!help", "!seen", "!greeting",
-                        "!stocks", "!crypto", "!timer", "!gif", "!msg", "!doc", "!pod", "!said", "!trump"
+                        "!stocks", "!crypto", "!timer", "!gif", "!msg", "!doc", "!pod", "!said", "!trump", "!mail"
                     ]
                     if not any(message.startswith(cmd) for cmd in valid_commands):
                         return
@@ -1820,6 +1830,8 @@ class BBSBotApp:
                         for chunk in chunks:
                             self.send_full_message(chunk)
                         return
+                    elif message.startswith("!mail"):
+                        self.handle_mail_command(message)
 
         # Update the previous line
         self.previous_line = clean_line
@@ -2675,6 +2687,8 @@ class BBSBotApp:
             episode = parts[2]
             self.handle_pod_command(username, show, episode)
             return
+        elif "!mail" in message:
+            self.handle_mail_command(message)
 
         if response:
             self.send_full_message(response)
@@ -2762,6 +2776,57 @@ class BBSBotApp:
                 return output
         except Exception as e:
             return f"Error running Trump post script: {str(e)}"
+
+    def load_email_credentials(self):
+        """Load email credentials from a file."""
+        if os.path.exists("email_credentials.json"):
+            with open("email_credentials.json", "r") as file:
+                return json.load(file)
+        return {}
+
+    def send_email(self, recipient, subject, body):
+        """Send an email using Gmail."""
+        credentials = self.load_email_credentials()
+        smtp_server = credentials.get("smtp_server", "smtp.gmail.com")
+        smtp_port = credentials.get("smtp_port", 587)
+        sender_email = credentials.get("sender_email")
+        sender_password = credentials.get("sender_password")
+
+        if not sender_email or not sender_password:
+            return "Email credentials are missing."
+
+        try:
+            msg = MIMEText(body)
+            msg["Subject"] = subject
+            msg["From"] = sender_email
+            msg["To"] = recipient
+
+            with smtplib.SMTP(smtp_server, smtp_port) as server:
+                server.ehlo()
+                server.starttls()
+                server.ehlo()
+                server.login(sender_email, sender_password)
+                server.sendmail(sender_email, [recipient], msg.as_string())
+
+            return f"Email sent to {recipient} successfully."
+        except Exception as e:
+            return f"Error sending email: {str(e)}"
+
+    def handle_mail_command(self, command_text):
+        """Handle the !mail command to send an email."""
+        try:
+            parts = shlex.split(command_text)
+            if len(parts) < 4:
+                self.send_full_message("Usage: !mail \"recipient@example.com\" \"Subject\" \"Body\"")
+                return
+
+            recipient = parts[1]
+            subject = parts[2]
+            body = parts[3]
+            response = self.send_email(recipient, subject, body)
+            self.send_full_message(response)
+        except ValueError as e:
+            self.send_full_message(f"Error parsing command: {str(e)}")
 
 def main():
     app = None  # Ensure app is defined
