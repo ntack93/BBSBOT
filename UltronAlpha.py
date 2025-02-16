@@ -1,11 +1,10 @@
-import tkinter as tk
-from tkinter import ttk
 import threading
 import asyncio
 import telnetlib3
 import time
 import queue
 import re
+import sys
 import requests
 import openai
 import json
@@ -16,6 +15,11 @@ from pytube import YouTube
 from pydub import AudioSegment
 import subprocess
 from openai import OpenAI
+import smtplib
+from email.mime.text import MIMEText
+import shlex
+import curses  # <-- UI change: added for CLI interface
+from BBSBotCLITmux import main_cli_tmux  # added import
 
 # Load API keys from api_keys.json
 def load_api_keys():
@@ -47,87 +51,38 @@ table_name = 'ChatBotConversations'
 table = dynamodb.Table(table_name)
 
 class BBSBotApp:
-    def __init__(self, master):
-        self.master = master
-        self.master.title("BBS Chatbot Jeremy")
+    def __init__(self):
+        
+        self.define_ansi_tags()  # Add this line to define ANSI tags
 
-        # ----------------- Configurable variables ------------------
-        self.host = tk.StringVar(value="bbs.example.com")
-        self.port = tk.IntVar(value=23)
-        self.openai_api_key = tk.StringVar(value=DEFAULT_OPENAI_API_KEY)
-        self.weather_api_key = tk.StringVar(value=DEFAULT_WEATHER_API_KEY)
-        self.youtube_api_key = tk.StringVar(value=DEFAULT_YOUTUBE_API_KEY)
-        self.google_cse_api_key = tk.StringVar(value=DEFAULT_GOOGLE_CSE_KEY)
-        self.google_cse_cx = tk.StringVar(value=DEFAULT_GOOGLE_CSE_CX)
-        self.news_api_key = tk.StringVar(value=DEFAULT_NEWS_API_KEY)
-        self.google_places_api_key = tk.StringVar(value=DEFAULT_GOOGLE_PLACES_API_KEY)
-        self.pexels_api_key = tk.StringVar(value=DEFAULT_PEXELS_API_KEY)  # Ensure Pexels API Key is loaded
-        self.nickname = tk.StringVar(value=self.load_nickname())
-        self.username = tk.StringVar(value=self.load_username())
-        self.password = tk.StringVar(value=self.load_password())
-        self.remember_username = tk.BooleanVar(value=False)
-        self.remember_password = tk.BooleanVar(value=False)
-        self.in_teleconference = False  # Flag to track teleconference state
-        self.mud_mode = tk.BooleanVar(value=False)
-        self.alpha_vantage_api_key = tk.StringVar(value=DEFAULT_ALPHA_VANTAGE_API_KEY)  # Ensure Alpha Vantage API Key is loaded
-        self.coinmarketcap_api_key = tk.StringVar(value=DEFAULT_COINMARKETCAP_API_KEY)  # Ensure CoinMarketCap API Key is loaded
-        self.logon_automation_enabled = tk.BooleanVar(value=False)  # Correct initialization
-        self.auto_login_enabled = tk.BooleanVar(value=False)  # Add Auto Login toggle
-        self.giphy_api_key = tk.StringVar(value=DEFAULT_GIPHY_API_KEY)  # Add Giphy API Key
-        self.split_view_enabled = False  # Add Split View toggle
-        self.split_view_clones = []  # Track split view clones
-        self.no_spam_mode = tk.BooleanVar(value=self.load_no_spam_state())  # Initialize using saved state
-        self.public_message_history = {}  # Dictionary to store public messages
-        self.multi_line_buffer = {}    # Maps username -> accumulated message string
-        self.multiline_timeout = {}    # Maps username -> timeout ID (from after())
+    def define_ansi_tags(self):
+        """Define text tags for basic ANSI foreground colors (30-37, 90-97)."""
+        self.terminal_display.tag_configure("normal", foreground="white")
 
-        # For best ANSI alignment, recommend a CP437-friendly monospace font:
-        self.font_name = tk.StringVar(value="Courier New")
-        self.font_size = tk.IntVar(value=10)
-
-        # Terminal mode (ANSI only)
-        self.terminal_mode = tk.StringVar(value="ANSI")
-
-        # Telnet references
-        self.reader = None
-        self.writer = None
-        self.stop_event = threading.Event()  # signals background thread to stop
-        self.connected = False
-
-        # A queue to pass data from telnet thread => main thread
-        self.msg_queue = queue.Queue()
-
-        # A buffer to accumulate partial lines
-        self.partial_line = ""
-        self.partial_message = ""  # Buffer to accumulate partial messages
-
-        self.favorites = self.load_favorites()  # Load favorite BBS addresses
-        self.favorites_window = None  # Track the Favorites window instance
-
-        self.chat_members = set()  # Set to keep track of chat members
-        self.last_seen = self.load_last_seen()  # Load last seen timestamps from file
-
-        # Build UI
-        self.build_ui()
-
-        # Periodically check for incoming messages
-        self.master.after(100, self.process_incoming_messages)
-
-        self.keep_alive_stop_event = threading.Event()
-        self.keep_alive_task = None
-        self.loop = asyncio.new_event_loop()  # Initialize loop attribute
-        asyncio.set_event_loop(self.loop)  # Set the event loop
-
-        self.dynamodb_client = boto3.client('dynamodb', region_name='us-east-1')
-        self.table_name = table_name
-        self.create_dynamodb_table()
-        self.previous_line = ""  # Store the previous line to detect multi-line triggers
-        self.user_list_buffer = []  # Buffer to accumulate user list lines
-        self.timers = {}  # Dictionary to store active timers
-        self.auto_greeting_enabled = False  # Default auto-greeting to off
-        self.pending_messages_table_name = 'PendingMessages'
-        self.create_pending_messages_table()
-        self.openai_client = OpenAI(api_key=self.openai_api_key.get())
+        color_map = {
+            '30': 'black',
+            '31': 'red',
+            '32': 'green',
+            '33': 'yellow',
+            '34': 'blue',
+            '35': 'magenta',
+            '36': 'cyan',
+            '37': 'white',
+            '90': 'bright_black',
+            '91': 'bright_red',
+            '92': 'bright_green',
+            '93': 'bright_yellow',
+            '94': 'bright_blue',
+            '95': 'bright_magenta',
+            '96': 'bright_cyan',
+            '97': 'bright_white'
+        }
+        for code, color_name in color_map.items():
+            if color_name.startswith("bright_"):
+                base_color = color_name.split("_", 1)[1]
+                self.terminal_display.tag_configure(color_name, foreground=base_color)
+            else:
+                self.terminal_display.tag_configure(color_name, foreground=color_name)
 
     def create_dynamodb_table(self):
         """Create DynamoDB table if it doesn't exist."""
@@ -244,341 +199,6 @@ class BBSBotApp:
                 'timestamp': timestamp
             }
         )
-
-    def build_ui(self):
-        """Set up frames, text areas, input boxes, etc."""
-        main_frame = ttk.Frame(self.master, name='main_frame')
-        main_frame.pack(fill=tk.BOTH, expand=True)
-
-        # ----- Config frame -----
-        config_frame = ttk.LabelFrame(main_frame, text="Connection Settings")
-        config_frame.pack(fill=tk.X, padx=5, pady=5)
-
-        ttk.Label(config_frame, text="BBS Host:").grid(row=0, column=0, padx=5, pady=5, sticky=tk.E)
-        self.host_entry = ttk.Entry(config_frame, textvariable=self.host, width=30)
-        self.host_entry.grid(row=0, column=1, padx=5, pady=5, sticky=tk.W)
-        self.create_context_menu(self.host_entry)
-
-        ttk.Label(config_frame, text="Port:").grid(row=0, column=2, padx=5, pady=5, sticky=tk.E)
-        self.port_entry = ttk.Entry(config_frame, textvariable=self.port, width=6)
-        self.port_entry.grid(row=0, column=3, padx=5, pady=5, sticky=tk.W)
-        self.create_context_menu(self.port_entry)
-
-        self.connect_button = ttk.Button(config_frame, text="Connect", command=self.toggle_connection)
-        self.connect_button.grid(row=0, column=4, padx=5, pady=5)
-
-        # Add a "Settings" button
-        settings_button = ttk.Button(config_frame, text="Settings", command=self.show_settings_window)
-        settings_button.grid(row=0, column=5, padx=5, pady=5)
-
-        # Add a "Favorites" button
-        favorites_button = ttk.Button(config_frame, text="Favorites", command=self.show_favorites_window)
-        favorites_button.grid(row=0, column=6, padx=5, pady=5)
-
-        # Add a "Mud Mode" checkbox
-        mud_mode_check = ttk.Checkbutton(config_frame, text="Mud Mode", variable=self.mud_mode)
-        mud_mode_check.grid(row=0, column=7, padx=5, pady=5)
-
-        # Add a "Split View" button
-        split_view_button = ttk.Button(config_frame, text="Split View", command=self.toggle_split_view)
-        split_view_button.grid(row=0, column=8, padx=5, pady=5)
-
-        # Add a "Teleconference" button
-        teleconference_button = ttk.Button(config_frame, text="Teleconference", command=self.send_teleconference_command)
-        teleconference_button.grid(row=0, column=9, padx=5, pady=5)
-
-        # ----- Username frame -----
-        username_frame = ttk.LabelFrame(main_frame, text="Username")
-        username_frame.pack(fill=tk.X, padx=5, pady=5)
-
-        self.username_entry = ttk.Entry(username_frame, textvariable=self.username, width=30)
-        self.username_entry.pack(side=tk.LEFT, padx=5, pady=5)
-        self.create_context_menu(self.username_entry)
-
-        self.remember_username_check = ttk.Checkbutton(username_frame, text="Remember", variable=self.remember_username)
-        self.remember_username_check.pack(side=tk.LEFT, padx=5, pady=5)
-
-        self.send_username_button = ttk.Button(username_frame, text="Send", command=self.send_username)
-        self.send_username_button.pack(side=tk.LEFT, padx=5, pady=5)
-
-        # ----- Password frame -----
-        password_frame = ttk.LabelFrame(main_frame, text="Password")
-        password_frame.pack(fill=tk.X, padx=5, pady=5)
-
-        self.password_entry = ttk.Entry(password_frame, textvariable=self.password, width=30, show="*")
-        self.password_entry.pack(side=tk.LEFT, padx=5, pady=5)
-        self.create_context_menu(self.password_entry)
-
-        self.remember_password_check = ttk.Checkbutton(password_frame, text="Remember", variable=self.remember_password)
-        self.remember_password_check.pack(side=tk.LEFT, padx=5, pady=5)
-
-        self.send_password_button = ttk.Button(password_frame, text="Send", command=self.send_password)
-        self.send_password_button.pack(side=tk.LEFT, padx=5, pady=5)
-
-        # ----- Terminal output -----
-        terminal_frame = ttk.LabelFrame(main_frame, text="BBS Output")
-        terminal_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-
-        self.terminal_display = tk.Text(
-            terminal_frame,
-            wrap=tk.WORD,
-            height=15,
-            state=tk.NORMAL,
-            bg="black"
-        )
-        self.terminal_display.configure(state=tk.DISABLED)
-        self.terminal_display.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-
-        scroll_bar = ttk.Scrollbar(terminal_frame, command=self.terminal_display.yview)
-        scroll_bar.pack(side=tk.RIGHT, fill=tk.Y)
-        self.terminal_display.configure(yscrollcommand=scroll_bar.set)
-
-        self.define_ansi_tags()
-
-        # ----- Input frame -----
-        input_frame = ttk.LabelFrame(main_frame, text="Send Message")
-        input_frame.pack(fill=tk.X, padx=5, pady=5)
-
-        self.input_var = tk.StringVar()
-        self.input_box = ttk.Entry(input_frame, textvariable=self.input_var, width=80)
-        self.input_box.pack(side=tk.LEFT, padx=5, pady=5, fill=tk.X, expand=True)
-        self.input_box.bind("<Return>", self.send_message)
-        self.create_context_menu(self.input_box)
-
-        self.send_button = ttk.Button(input_frame, text="Send", command=self.send_message)
-        self.send_button.pack(side=tk.LEFT, padx=5, pady=5)
-
-        # Set initial font
-        self.update_display_font()
-
-    def create_context_menu(self, widget):
-        """Create a right-click context menu for the given widget."""
-        menu = tk.Menu(widget, tearoff=0)
-        menu.add_command(label="Cut", command=lambda: widget.event_generate("<<Cut>>"))
-        menu.add_command(label="Copy", command=lambda: widget.event_generate("<<Copy>>"))
-        menu.add_command(label="Paste", command=lambda: widget.event_generate("<<Paste>>"))
-        menu.add_command(label="Select All", command=lambda: widget.event_generate("<<SelectAll>>"))
-
-        def show_context_menu(event):
-            menu.tk_popup(event.x_root, event.y_root)
-
-        widget.bind("<Button-3>", show_context_menu)
-
-    def show_settings_window(self):
-        """Open a Toplevel with fields for API keys, font settings, etc."""
-        settings_win = tk.Toplevel(self.master)
-        settings_win.title("Settings")
-
-        row_index = 0
-
-        # ----- OpenAI API Key -----
-        ttk.Label(settings_win, text="OpenAI API Key:").grid(row=row_index, column=0, padx=5, pady=5, sticky=tk.E)
-        openai_api_key_entry = ttk.Entry(settings_win, textvariable=self.openai_api_key, width=40)
-        openai_api_key_entry.grid(row=row_index, column=1, padx=5, pady=5)
-        self.create_context_menu(openai_api_key_entry)
-        row_index += 1
-
-        # ----- Weather API Key -----
-        ttk.Label(settings_win, text="Weather API Key:").grid(row=row_index, column=0, padx=5, pady=5, sticky=tk.E)
-        weather_api_key_entry = ttk.Entry(settings_win, textvariable=self.weather_api_key, width=40)
-        weather_api_key_entry.grid(row=row_index, column=1, padx=5, pady=5)
-        self.create_context_menu(weather_api_key_entry)
-        row_index += 1
-
-        # ----- YouTube API Key -----
-        ttk.Label(settings_win, text="YouTube API Key:").grid(row=row_index, column=0, padx=5, pady=5, sticky=tk.E)
-        youtube_api_key_entry = ttk.Entry(settings_win, textvariable=self.youtube_api_key, width=40)
-        youtube_api_key_entry.grid(row=row_index, column=1, padx=5, pady=5)
-        self.create_context_menu(youtube_api_key_entry)
-        row_index += 1
-
-        # ----- Google CSE Key -----
-        ttk.Label(settings_win, text="Google CSE API Key:").grid(row=row_index, column=0, padx=5, pady=5, sticky=tk.E)
-        google_cse_api_key_entry = ttk.Entry(settings_win, textvariable=self.google_cse_api_key, width=40)
-        google_cse_api_key_entry.grid(row=row_index, column=1, padx=5, pady=5)
-        self.create_context_menu(google_cse_api_key_entry)
-        row_index += 1
-
-        # ----- Google CSE ID (cx) -----
-        ttk.Label(settings_win, text="Google CSE ID (cx):").grid(row=row_index, column=0, padx=5, pady=5, sticky=tk.E)
-        google_cse_cx_entry = ttk.Entry(settings_win, textvariable=self.google_cse_cx, width=40)
-        google_cse_cx_entry.grid(row=row_index, column=1, padx=5, pady=5)
-        self.create_context_menu(google_cse_cx_entry)
-        row_index += 1
-
-        # ----- News API Key -----
-        ttk.Label(settings_win, text="News API Key:").grid(row=row_index, column=0, padx=5, pady=5, sticky=tk.E)
-        news_api_key_entry = ttk.Entry(settings_win, textvariable=self.news_api_key, width=40)
-        news_api_key_entry.grid(row=row_index, column=1, padx=5, pady=5)
-        self.create_context_menu(news_api_key_entry)
-        row_index += 1
-
-        # ----- Google Places API Key -----
-        ttk.Label(settings_win, text="Google Places API Key:").grid(row=row_index, column=0, padx=5, pady=5, sticky=tk.E)
-        google_places_api_key_entry = ttk.Entry(settings_win, textvariable=self.google_places_api_key, width=40)
-        google_places_api_key_entry.grid(row=row_index, column=1, padx=5, pady=5)
-        self.create_context_menu(google_places_api_key_entry)
-        row_index += 1
-
-        # ----- Pexels API Key -----
-        ttk.Label(settings_win, text="Pexels API Key:").grid(row=row_index, column=0, padx=5, pady=5, sticky=tk.E)
-        pexels_api_key_entry = ttk.Entry(settings_win, textvariable=self.pexels_api_key, width=40)
-        pexels_api_key_entry.grid(row=row_index, column=1, padx=5, pady=5)
-        self.create_context_menu(pexels_api_key_entry)
-        row_index += 1
-
-        # ----- Alpha Vantage API Key -----
-        ttk.Label(settings_win, text="Alpha Vantage API Key:").grid(row=row_index, column=0, padx=5, pady=5, sticky=tk.E)
-        alpha_vantage_api_key_entry = ttk.Entry(settings_win, textvariable=self.alpha_vantage_api_key, width=40)
-        alpha_vantage_api_key_entry.grid(row=row_index, column=1, padx=5, pady=5)
-        self.create_context_menu(alpha_vantage_api_key_entry)
-        row_index += 1
-
-        # ----- CoinMarketCap API Key -----
-        ttk.Label(settings_win, text="CoinMarketCap API Key:").grid(row=row_index, column=0, padx=5, pady=5, sticky=tk.E)
-        coinmarketcap_api_key_entry = ttk.Entry(settings_win, textvariable=self.coinmarketcap_api_key, width=40)
-        coinmarketcap_api_key_entry.grid(row=row_index, column=1, padx=5, pady=5)
-        self.create_context_menu(coinmarketcap_api_key_entry)
-        row_index += 1
-
-        # ----- Giphy API Key -----
-        ttk.Label(settings_win, text="Giphy API Key:").grid(row=row_index, column=0, padx=5, pady=5, sticky=tk.E)
-        giphy_api_key_entry = ttk.Entry(settings_win, textvariable=self.giphy_api_key, width=40)
-        giphy_api_key_entry.grid(row=row_index, column=1, padx=5, pady=5)
-        self.create_context_menu(giphy_api_key_entry)
-        row_index += 1
-
-        # ----- Font Name -----
-        ttk.Label(settings_win, text="Font Name:").grid(row=row_index, column=0, padx=5, pady=5, sticky=tk.E)
-        font_options = ["Courier New", "Px437 IBM VGA8", "Terminus (TTF)", "Consolas", "Lucida Console"]
-        font_dropdown = ttk.Combobox(settings_win, textvariable=self.font_name, values=font_options, state="readonly")
-        font_dropdown.grid(row=row_index, column=1, padx=5, pady=5, sticky=tk.W)
-        row_index += 1
-
-        # ----- Font Size -----
-        ttk.Label(settings_win, text="Font Size:").grid(row=row_index, column=0, padx=5, pady=5, sticky=tk.E)
-        ttk.Entry(settings_win, textvariable=self.font_size, width=5).grid(row=row_index, column=1, padx=5, pady=5, sticky=tk.W)
-        row_index += 1
-
-        # Info label about recommended fonts
-        info_label = ttk.Label(
-            settings_win,
-            text=(
-                "Tip: For best ANSI alignment, install a CP437-compatible\n"
-                "monospace font like 'Px437 IBM VGA8' or 'Terminus (TTF)'.\n"
-                "Then select its name from the Font Name dropdown."
-            )
-        )
-        info_label.grid(row=row_index, column=0, columnspan=2, padx=5, pady=5, sticky=tk.W)
-        row_index += 1
-
-        # Add Mud Mode checkbox
-        ttk.Label(settings_win, text="Mud Mode:").grid(row=row_index, column=0, padx=5, pady=5, sticky=tk.E)
-        ttk.Checkbutton(settings_win, variable=self.mud_mode).grid(row=row_index, column=1, padx=5, pady=5, sticky=tk.W)
-        row_index += 1
-
-        # Add Logon Automation checkbox
-        ttk.Label(settings_win, text="Logon Automation:").grid(row=row_index, column=0, padx=5, pady=5, sticky=tk.E)
-        ttk.Checkbutton(settings_win, variable=self.logon_automation_enabled).grid(row=row_index, column=1, padx=5, pady=5, sticky=tk.W)
-        row_index += 1
-
-        # Add Auto Login checkbox
-        ttk.Label(settings_win, text="Auto Login:").grid(row=row_index, column=0, padx=5, pady=5, sticky=tk.E)
-        ttk.Checkbutton(settings_win, variable=self.auto_login_enabled).grid(row=row_index, column=1, padx=5, pady=5, sticky=tk.W)
-        row_index += 1
-
-        # Add No Spam Mode checkbox
-        ttk.Label(settings_win, text="No Spam Mode:").grid(row=row_index, column=0, padx=5, pady=5, sticky=tk.E)
-        ttk.Checkbutton(settings_win, variable=self.no_spam_mode).grid(row=row_index, column=1, padx=5, pady=5, sticky=tk.W)
-        row_index += 1
-
-        # ----- Save Button -----
-        save_button = ttk.Button(settings_win, text="Save", command=lambda: self.save_settings(settings_win))
-        save_button.grid(row=row_index, column=0, columnspan=2, pady=10)
-
-    def save_settings(self, window):
-        """Called when user clicks 'Save' in the settings window."""
-        self.update_display_font()
-        self.openai_client = OpenAI(api_key=self.openai_api_key.get())
-        # Save new API keys
-        self.save_api_keys()
-        window.destroy()
-
-    def save_api_keys(self):
-        """Save API keys to a file."""
-        api_keys = {
-            "openai_api_key": self.openai_api_key.get(),
-            "weather_api_key": self.weather_api_key.get(),
-            "youtube_api_key": self.youtube_api_key.get(),
-            "google_cse_api_key": self.google_cse_api_key.get(),
-            "google_cse_cx": self.google_cse_cx.get(),
-            "news_api_key": self.news_api_key.get(),
-            "google_places_api_key": self.google_places_api_key.get(),
-            "pexels_api_key": self.pexels_api_key.get(),
-            "alpha_vantage_api_key": self.alpha_vantage_api_key.get(),
-            "coinmarketcap_api_key": self.coinmarketcap_api_key.get(),
-            "giphy_api_key": self.giphy_api_key.get()  # Save Giphy API Key
-        }
-        with open("api_keys.json", "w") as file:
-            json.dump(api_keys, file)
-
-    def load_api_keys(self):
-        """Load API keys from a file."""
-        if os.path.exists("api_keys.json"):
-            with open("api_keys.json", "r") as file:
-                api_keys = json.load(file)
-                self.openai_api_key.set(api_keys.get("openai_api_key", ""))
-                self.weather_api_key.set(api_keys.get("weather_api_key", ""))
-                self.youtube_api_key.set(api_keys.get("youtube_api_key", ""))
-                self.google_cse_api_key.set(api_keys.get("google_cse_api_key", ""))
-                self.google_cse_cx.set(api_keys.get("google_cse_cx", ""))
-                self.news_api_key.set(api_keys.get("news_api_key", ""))
-                self.google_places_api_key.set(api_keys.get("google_places_api_key", ""))
-                self.pexels_api_key.set(api_keys.get("pexels_api_key", ""))  # Ensure Pexels API Key is loaded
-                self.alpha_vantage_api_key.set(api_keys.get("alpha_vantage_api_key", ""))  # Ensure Alpha Vantage API Key is loaded
-                self.coinmarketcap_api_key.set(api_keys.get("coinmarketcap_api_key", ""))  # Ensure CoinMarketCap API Key is loaded
-                self.giphy_api_key.set(api_keys.get("giphy_api_key", ""))  # Ensure Giphy API Key is loaded
-
-    def update_display_font(self):
-        """Update the Text widget's font based on self.font_name and self.font_size."""
-        new_font = (self.font_name.get(), self.font_size.get())
-        self.terminal_display.configure(font=new_font)
-
-    def define_ansi_tags(self):
-        """Define text tags for basic ANSI foreground colors (30-37, 90-97)."""
-        self.terminal_display.tag_configure("normal", foreground="white")
-
-        color_map = {
-            '30': 'black',
-            '31': 'red',
-            '32': 'green',
-            '33': 'yellow',
-            '34': 'blue',
-            '35': 'magenta',
-            '36': 'cyan',
-            '37': 'white',
-            '90': 'bright_black',
-            '91': 'bright_red',
-            '92': 'bright_green',
-            '93': 'bright_yellow',
-            '94': 'bright_blue',
-            '95': 'bright_magenta',
-            '96': 'bright_cyan',
-            '97': 'bright_white'
-        }
-        for code, color_name in color_map.items():
-            if color_name.startswith("bright_"):
-                base_color = color_name.split("_", 1)[1]
-                self.terminal_display.tag_configure(color_name, foreground=base_color)
-            else:
-                self.terminal_display.tag_configure(color_name, foreground=color_name)
-
-    def toggle_connection(self):
-        """Connect or disconnect from the BBS."""
-        if self.connected:
-            asyncio.run_coroutine_threadsafe(self.disconnect_from_bbs(), self.loop).result()
-        else:
-            self.start_connection()
 
     def connect_to_bbs(self, address):
         """Connect to the BBS with the given address."""
@@ -876,7 +496,7 @@ class BBSBotApp:
             username = page_message_match.group(1)
             module_or_channel = page_message_match.group(3)
             message = page_message_match.group(4)
-            self.handle_page_trigger(username, module_or_channel, message)
+            self._trigger(username, module_or_channel, message)
             return
 
         # Check for direct messages
@@ -979,7 +599,7 @@ class BBSBotApp:
             response = self.get_crypto_price(crypto)
         elif "!gif" in message:
             query = message.split("!gif", 1)[1].strip()
-            response = self.handle_gif_command(query)
+            response = self.get_gif_response(query)
         elif "!doc" in message:
             query = message.split("!doc", 1)[1].strip()
             self.handle_doc_command(query, username)
@@ -995,21 +615,22 @@ class BBSBotApp:
             episode = parts[2]
             self.handle_pod_command(username, show, episode)
             return
+        elif "!mail" in message:
+            self.handle_mail_command(message)
+        elif "!radio" in message:
+            match = re.match(r'!radio\s+"([^"]+)"', message)
+            if match:
+                query = match.group(1)
+                self.handle_radio_command(query)
+            else:
+                self.send_private_message(username, 'Usage: !radio "search query"')
         else:
             # Assume it's a message for the !chat trigger
             response = self.get_chatgpt_response(message, username=username)
 
         self.send_private_message(username, response)
 
-    def send_private_message(self, username, message):
-        """
-        Send a private message to the specified user.
-        """
-        chunks = self.chunk_message(message, 250)
-        for chunk in chunks:
-            full_message = f"Whisper to {username} {chunk}"
-            asyncio.run_coroutine_threadsafe(self._send_message(full_message + "\r\n"), self.loop)
-            self.append_terminal_text(full_message + "\n", "normal")
+    
 
     def handle_page_trigger(self, username, module_or_channel, message):
         """
@@ -1052,7 +673,7 @@ class BBSBotApp:
             response = self.get_seen_response(target_username)
         elif "!gif" in message:
             query = message.split("!gif", 1)[1].strip()
-            response = self.handle_gif_command(query)
+            response = self.get_gif_response(query)
         elif "!doc" in message:
             query = message.split("!doc", 1)[1].strip()
             self.handle_doc_command(query, username)
@@ -1067,34 +688,22 @@ class BBSBotApp:
             episode = parts[2]
             self.handle_pod_command(username, show, episode, is_page=True, module_or_channel=module_or_channel)
             return
-        elif "!polly" in message:
-            parts = message.split(maxsplit=2)
-            if len(parts) < 3:
-                self.send_page_response(username, module_or_channel, "Usage: !polly <voice> <text>")
-                return
-            voice = parts[1]
-            text = parts[2]
-            self.handle_polly_command(voice, text)
+        elif "!mail" in message:
+            self.handle_mail_command(message)
+        elif "!radio" in message:
+            match = re.match(r'!radio\s+"([^"]+)"', message)
+            if match:
+                query = match.group(1)
+                self.handle_radio_command(query)
+            else:
+                self.send_page_response(username, module_or_channel, 'Usage: !radio "search query"')
 
         if response:
             self.send_page_response(username, module_or_channel, response)
 
-    def get_who_response(self):
-        """Return a list of users currently in the chatroom."""
-        if not self.chat_members:
-            return "No users currently in the chatroom."
-        else:
-            return "Users currently in the chatroom: " + ", ".join(self.chat_members)
+    
 
-    def send_page_response(self, username, module_or_channel, message):
-        """
-        Send a page response to the specified user and module/channel.
-        """
-        chunks = self.chunk_message(message, 250)
-        for chunk in chunks:
-            full_message = f"/P {username} {chunk}"
-            asyncio.run_coroutine_threadsafe(self._send_message(full_message + "\r\n"), self.loop)
-            self.append_terminal_text(full_message + "\n", "normal")
+    
 
     def handle_direct_message(self, username, message):
         """
@@ -1123,6 +732,17 @@ class BBSBotApp:
             episode = parts[2]
             self.handle_pod_command(username, show, episode)
             return
+        elif "!mail" in message:
+            self.handle_mail_command(message)
+            return
+        elif "!radio" in message:
+            match = re.match(r'!radio\s+"([^"]+)"', message)
+            if match:
+                query = match.group(1)
+                self.handle_radio_command(query)
+            else:
+                self.send_direct_message(username, 'Usage: !radio "search query"')
+                return
         else:
             response = self.get_chatgpt_response(message, direct=True, username=username)
 
@@ -1138,14 +758,29 @@ class BBSBotApp:
             asyncio.run_coroutine_threadsafe(self._send_message(full_message + "\r\n"), self.loop)
             self.append_terminal_text(full_message + "\n", "normal")
 
-    def get_weather_response(self, location):
+    def get_weather_response(self, args):
         """Fetch weather info and return the response as a string."""
         key = self.weather_api_key.get()
         if not key:
             return "Weather API key is missing."
-        elif not location:
-            return "Please specify a city or zip code."
-        else:
+
+        # Split args into command, city, and state
+        parts = args.strip().split(maxsplit=3)
+        if len(parts) < 3:
+            return "Usage: !weather <current/forecast> <city> <state>"
+
+        command, city, state = parts[0], parts[1], parts[2]
+
+        if command.lower() not in ['current', 'forecast']:
+            return "Please specify either 'current' or 'forecast' as the first argument."
+
+        if not city or not state:
+            return "Please specify both city and state."
+
+        location = f"{city},{state}"
+
+        if command.lower() == 'current':
+            # Get current weather
             url = "http://api.openweathermap.org/data/2.5/weather"
             params = {
                 "q": location,
@@ -1154,23 +789,58 @@ class BBSBotApp:
             }
             try:
                 r = requests.get(url, params=params, timeout=10)
-                r.raise_for_status()  # Raise an HTTPError for bad responses
+                r.raise_for_status()
                 data = r.json()
                 if data.get("cod") != 200:
                     return f"Could not get weather for '{location}'."
-                else:
-                    desc = data["weather"][0]["description"]
-                    temp_f = data["main"]["temp"]
-                    feels_like = data["main"]["feels_like"]
-                    humidity = data["main"]["humidity"]
-                    wind_speed = data["wind"]["speed"]
-                    precipitation = data.get("rain", {}).get("1h", 0) + data.get("snow", {}).get("1h", 0)
+                
+                desc = data["weather"][0]["description"]
+                temp_f = data["main"]["temp"]
+                feels_like = data["main"]["feels_like"]
+                humidity = data["main"]["humidity"]
+                wind_speed = data["wind"]["speed"]
+                precipitation = data.get("rain", {}).get("1h", 0) + data.get("snow", {}).get("1h", 0)
 
-                    return (
-                        f"Weather in {location.title()}: {desc}, {temp_f:.1f}°F "
-                        f"(feels like {feels_like:.1f}°F), Humidity {humidity}%, Wind {wind_speed} mph, "
-                        f"Precipitation {precipitation} mm."
-                    )
+                return (
+                    f"Current weather in {city.title()}, {state.upper()}: {desc}, {temp_f:.1f}°F "
+                    f"(feels like {feels_like:.1f}°F), Humidity {humidity}%, Wind {wind_speed} mph, "
+                    f"Precipitation {precipitation} mm."
+                )
+            except requests.exceptions.RequestException as e:
+                return f"Error fetching weather: {str(e)}"
+
+        else:  # forecast
+            # Get 5-day forecast
+            url = "http://api.openweathermap.org/data/2.5/forecast"
+            params = {
+                "q": location,
+                "appid": key,
+                "units": "imperial"
+            }
+            try:
+                r = requests.get(url, params=params, timeout=10)
+                r.raise_for_status()
+                data = r.json()
+                if data.get("cod") != "200":
+                    return f"Could not get forecast for '{location}'."
+
+                # Get next 3 days forecast (excluding today)
+                forecasts = []
+                current_date = None
+                for item in data['list']:
+                    date = time.strftime('%Y-%m-%d', time.localtime(item['dt']))
+                    if date == time.strftime('%Y-%m-%d'):  # Skip today
+                        continue
+                    if date != current_date and len(forecasts) < 3:  # Get next 3 days
+                        current_date = date
+                        temp = item['main']['temp']
+                        desc = item['weather'][0]['description']
+                        forecasts.append(f"{time.strftime('%A', time.localtime(item['dt']))}: {desc}, {temp:.1f}°F")
+
+                return (
+                    f"3-day forecast for {city.title()}, {state.upper()}: " + 
+                    ", ".join(forecasts)
+                )
             except requests.exceptions.RequestException as e:
                 return f"Error fetching weather: {str(e)}"
 
@@ -1322,34 +992,6 @@ class BBSBotApp:
         print(f"[DEBUG] ChatGPT response: {gpt_response}")  # Log ChatGPT response
         return gpt_response
 
-    def handle_chatgpt_command(self, user_text, username=None):
-        """
-        Send user_text to ChatGPT and handle responses.
-        The response can be longer than 220 characters but will be split into blocks.
-        """
-        self.refresh_membership()  # Refresh membership before generating response
-        time.sleep(1)  # Allow time for membership list to be updated
-        self.master.update()  # Process any pending updates
-
-        # Fetch the latest chat members from DynamoDB
-        self.chat_members = set(self.get_chat_members())
-        print(f"[DEBUG] Updated chat members list before generating response: {self.chat_members}")
-
-        response = self.get_chatgpt_response(user_text, username=username)
-        self.send_full_message(response)
-
-        # Save the conversation for non-directed messages
-        if username is None:
-            username = "public_chat"
-        self.save_conversation(username, user_text, response)
-
-    def handle_news_command(self, topic):
-        """Fetch top 2 news headlines based on the given topic."""
-        response = self.get_news_response(topic)
-        chunks = self.chunk_message(response, 250)
-        for chunk in chunks:
-            self.send_full_message(chunk)
-
     def get_map_response(self, place):
         """Fetch place info from Google Places API and return the response as a string."""
         key = self.google_places_api_key.get()
@@ -1395,7 +1037,7 @@ class BBSBotApp:
             "Available commands: Please use a ! immediately followed by one of the following keywords (no space): "
             "weather <location>, yt <query>, search <query>, chat <message>, news <topic>, map <place>, pic <query>, "
             "polly <voice> <text>, mp3yt <youtube link>, help, seen <username>, greeting, stocks <symbol>, "
-            "crypto <symbol>, timer <value> <minutes or seconds>, gif <query>, msg <username> <message>, doc <query>, pod <show> <episode> nospam.\n"
+            "crypto <symbol>, timer <value> <minutes or seconds>, gif <query>, msg <username> <message>, doc <query>, pod <show> <episode>, !trump, nospam.\n"
         )
 
     def append_terminal_text(self, text, default_tag="normal"):
@@ -1732,7 +1374,7 @@ class BBSBotApp:
                     valid_commands = [
                         "!weather", "!yt", "!search", "!chat", "!news", "!map",
                         "!pic", "!polly", "!mp3yt", "!help", "!seen", "!greeting",
-                        "!stocks", "!crypto", "!timer", "!gif", "!msg", "!doc", "!pod", "!said"
+                        "!stocks", "!crypto", "!timer", "!gif", "!msg", "!doc", "!pod", "!said", "!trump", "!mail", "!blaz"
                     ]
                     if not any(message.startswith(cmd) for cmd in valid_commands):
                         return
@@ -1762,7 +1404,7 @@ class BBSBotApp:
                     elif message.startswith("!polly"):
                         parts = message.split(maxsplit=2)
                         if len(parts) < 3:
-                            self.send_full_message("Usage: !polly <voice> <text>")
+                            self.send_full_message("Usage: !polly <voice> <text> - Voices are Ruth, Joanna, Danielle, Matthew, Stephen")
                         else:
                             voice = parts[1]
                             text = parts[2]
@@ -1793,90 +1435,39 @@ class BBSBotApp:
                             self.handle_timer_command(sender, value, unit)
                     elif message.startswith("!gif"):
                         query = message.split("!gif", 1)[1].strip()
-                        self.handle_gif_command(query)
+                        self.send_full_message(self.get_gif_response(query))
                     elif message.startswith("!msg"):
                         parts = message.split(maxsplit=2)
                         if len(parts) < 3:
                             self.send_full_message("Usage: !msg <username> <message>")
                         else:
                             recipient = parts[1]
-                            msg = parts[2]
-                            self.handle_msg_command(recipient, msg, sender)
+                            message = parts[2]
+                            self.handle_msg_command(recipient, message, sender)
                     elif message.startswith("!doc"):
                         query = message.split("!doc", 1)[1].strip()
                         self.handle_doc_command(query, sender, public=True)
                     elif message.startswith("!pod"):
-                        parts = message.split(maxsplit=2)
-                        if len(parts) < 3:
-                            self.send_full_message("Usage: !pod <show> <episode name or number>")
-                        else:
-                            show = parts[1]
-                            episode = parts[2]
-                            self.handle_pod_command(sender, show, episode)
+                        self.handle_pod_command(sender, message)
                     elif message.startswith("!said"):
                         self.handle_said_command(sender, message)
                         return
+                    elif message.startswith("!trump"):
+                        trump_text = self.get_trump_post()
+                        chunks = self.chunk_message(trump_text, 250)
+                        for chunk in chunks:
+                            self.send_full_message(chunk)
+                        return
+                    elif message.startswith("!mail"):
+                        self.handle_mail_command(message)
+                    elif message.startswith("!blaz"):
+                        call_letters = message.split("!blaz", 1)[1].strip()
+                        self.handle_blaz_command(call_letters)
 
         # Update the previous line
         self.previous_line = clean_line
 
-    def handle_private_trigger(self, username, message):
-        """
-        Handle private message triggers and respond privately.
-        """
-        response = "Unknown command."  # Initialize response with a default value
-        if "!weather" in message:
-            location = message.split("!weather", 1)[1].strip()
-            response = self.get_weather_response(location)
-        elif "!yt" in message:
-            query = message.split("!yt", 1)[1].strip()
-            response = self.get_youtube_response(query)
-        elif "!search" in message:
-            query = message.split("!search", 1)[1].strip()
-            response = self.get_web_search_response(query)
-        elif "!chat" in message:
-            query = message.split("!chat", 1)[1].strip()
-            response = self.get_chatgpt_response(query, username=username)
-        elif "!news" in message:
-            topic = message.split("!news", 1)[1].strip()
-            response = self.get_news_response(topic)
-        elif "!map" in message:
-            place = message.split("!map", 1)[1].strip()
-            response = self.get_map_response(place)
-        elif "!pic" in message:
-            query = message.split("!pic", 1)[1].strip()
-            response = self.get_pic_response(query)
-        elif "!help" in message:
-            response = self.get_help_response()
-        elif "!stocks" in message:
-            symbol = message.split("!stocks", 1)[1].strip()
-            response = self.get_stock_price(symbol)
-        elif "!crypto" in message:
-            crypto = message.split("!crypto", 1)[1].strip()
-            response = self.get_crypto_price(crypto)
-        elif "!gif" in message:
-            query = message.split("!gif", 1)[1].strip()
-            response = self.handle_gif_command(query)
-        elif "!doc" in message:
-            query = message.split("!doc", 1)[1].strip()
-            self.handle_doc_command(query, username)
-            return  # Exit early to avoid sending a response twice
-        elif "!said" in message:
-            self.handle_said_command(username, message)
-        elif "!pod" in message:
-            parts = message.split(maxsplit=2)
-            if len(parts) < 3:
-                self.send_private_message(username, "Usage: !pod <show> <episode name or number>")
-                return
-            show = parts[1]
-            episode = parts[2]
-            self.handle_pod_command(username, show, episode)
-            return
-        else:
-            # Assume it's a message for the !chat trigger
-            response = self.get_chatgpt_response(message, username=username)
-
-        self.send_private_message(username, response)
+    
 
     def send_private_message(self, username, message):
         """
@@ -1888,73 +1479,7 @@ class BBSBotApp:
             asyncio.run_coroutine_threadsafe(self._send_message(full_message + "\r\n"), self.loop)
             self.append_terminal_text(full_message + "\n", "normal")
 
-    def handle_page_trigger(self, username, module_or_channel, message):
-        """
-        Handle page message triggers and respond accordingly.
-        """
-        response = None  # Initialize response with None
-        if "!weather" in message:
-            location = message.split("!weather", 1)[1].strip()
-            response = self.get_weather_response(location)
-        elif "!yt" in message:
-            query = message.split("!yt", 1)[1].strip()
-            response = self.get_youtube_response(query)
-        elif "!search" in message:
-            query = message.split("!search", 1)[1].strip()
-            response = self.get_web_search_response(query)
-        elif "!chat" in message:
-            query = message.split("!chat", 1)[1].strip()
-            response = self.get_chatgpt_response(query, username=username)
-        elif "!news" in message:
-            topic = message.split("!news", 1)[1].strip()
-            response = self.get_news_response(topic)
-        elif "!map" in message:
-            place = message.split("!map", 1)[1].strip()
-            response = self.get_map_response(place)
-        elif "!pic" in message:
-            query = message.split("!pic", 1)[1].strip()
-            response = self.get_pic_response(query)
-        elif "!help" in message:
-            response = self.get_help_response()
-        elif "!stocks" in message:
-            symbol = message.split("!stocks", 1)[1].strip()
-            response = self.get_stock_price(symbol)
-        elif "!crypto" in message:
-            crypto = message.split("!crypto", 1)[1].strip()
-            response = self.get_crypto_price(crypto)
-        elif "!who" in message:
-            response = self.get_who_response()
-        elif "!seen" in message:
-            target_username = message.split("!seen", 1)[1].strip()
-            response = self.get_seen_response(target_username)
-        elif "!gif" in message:
-            query = message.split("!gif", 1)[1].strip()
-            response = self.handle_gif_command(query)
-        elif "!doc" in message:
-            query = message.split("!doc", 1)[1].strip()
-            self.handle_doc_command(query, username)
-        elif "!said" in message:
-            self.handle_said_command(username, message, is_page=True, module_or_channel=module_or_channel)
-        elif "!pod" in message:
-            parts = message.split(maxsplit=2)
-            if len(parts) < 3:
-                self.send_page_response(username, module_or_channel, "Usage: !pod <show> <episode name or number>")
-                return
-            show = parts[1]
-            episode = parts[2]
-            self.handle_pod_command(username, show, episode, is_page=True, module_or_channel=module_or_channel)
-            return
-        elif "!polly" in message:
-            parts = message.split(maxsplit=2)
-            if len(parts) < 3:
-                self.send_page_response(username, module_or_channel, "Usage: !polly <voice> <text>")
-                return
-            voice = parts[1]
-            text = parts[2]
-            self.handle_polly_command(voice, text)
-
-        if response:
-            self.send_page_response(username, module_or_channel, response)
+    
 
     def get_who_response(self):
         """Return a list of users currently in the chatroom."""
@@ -2399,7 +1924,7 @@ class BBSBotApp:
             time_diff = int(time.time()) - last_seen_time
             hours, remainder = divmod(time_diff, 3600)
             minutes, seconds = divmod(remainder, 60)
-            return f"{username} was last seen on {last_seen_str} ({hours} hours, {minutes} minutes, {seconds} seconds ago)."
+            return f"{username} was last seen on {last_seen_str} ({hours} hours, {minutes, seconds} seconds ago)."
         else:
             return f"{username} has not been seen in the chatroom."
 
@@ -2519,8 +2044,8 @@ class BBSBotApp:
                 if not gifs:
                     response = f"No GIFs found for '{query}'."
                 else:
-                    gif_url = gifs[0]["url"]
-                    response = f"Here is your GIF: {gif_url}"
+                    gif_url = gifs[0].get("url", "No URL")
+                    response = f"GIF for '{query}': {gif_url}"
             except requests.exceptions.RequestException as e:
                 response = f"Error fetching GIF: {str(e)}"
 
@@ -2776,7 +2301,7 @@ class BBSBotApp:
             response = self.get_crypto_price(crypto)
         elif "!gif" in message:
             query = message.split("!gif", 1)[1].strip()
-            response = self.handle_gif_command(query)
+            response = self.get_gif_response(query)
         elif "!doc" in message:
             query = message.split("!doc", 1)[1].strip()
             self.handle_doc_command(query, username, public=True)
@@ -2785,28 +2310,30 @@ class BBSBotApp:
             self.handle_said_command(username, message)
             return
         elif "!pod" in message:
-            parts = message.split(maxsplit=2)
-            if len(parts) < 3:
-                self.send_full_message("Usage: !pod <show> <episode name or number>")
-                return
-            show = parts[1]
-            episode = parts[2]
-            self.handle_pod_command(username, show, episode)
+            self.handle_pod_command(username, message)
             return
-        elif "!polly" in message:
-            parts = message.split(maxsplit=2)
-            if len(parts) < 3:
-                self.send_full_message("Usage: !polly <voice> <text>")
-                return
-            voice = parts[1]
-            text = parts[2]
-            self.handle_polly_command(voice, text)
+        elif "!mail" in message:
+            self.handle_mail_command(message)
+        elif "!blaz" in message:
+            call_letters = message.split("!blaz", 1)[1].strip()
+            self.handle_blaz_command(call_letters)
 
         if response:
             self.send_full_message(response)
 
-    def handle_pod_command(self, sender, show, episode, is_page=False, module_or_channel=None):
+    def handle_pod_command(self, sender, command_text, is_page=False, module_or_channel=None):
         """Handle the !pod command to fetch podcast episode details."""
+        match = re.match(r'!pod\s+"([^"]+)"\s+"([^"]+)"', command_text)
+        if not match:
+            response = 'Usage: !pod "<show>" "<episode name or number>"'
+            if is_page and module_or_channel:
+                self.send_page_response(sender, module_or_channel, response)
+            else:
+                self.send_full_message(response)
+            return
+
+        show = match.group(1)
+        episode = match.group(2)
         response = self.get_podcast_response(show, episode)
         if is_page and module_or_channel:
             self.send_page_response(sender, module_or_channel, response)
@@ -2865,35 +2392,422 @@ class BBSBotApp:
         except Exception as e:
             return f"Error fetching podcast details: {str(e)}"
 
-def main():
-    app = None  # Ensure app is defined
-    try:
-        asyncio.set_event_loop(asyncio.new_event_loop())
-        root = tk.Tk()
-        app = BBSBotApp(root)
-        root.mainloop()
-    except KeyboardInterrupt:
-        print("Script interrupted by user. Exiting...")
-    except Exception as e:
-        print(f"An error occurred: {e}")
-    finally:
-        if app and app.connected:
-            try:
-                asyncio.run_coroutine_threadsafe(app.disconnect_from_bbs(), app.loop).result()
-            except Exception as e:
-                print(f"Error during disconnect: {e}")
+    def get_trump_post(self):
+        """Run the Trump post scraper script and return the latest post."""
         try:
-            if root.winfo_exists():
-                root.quit()
-        except tk.TclError:
-            pass
-        finally:
+            command = [
+                sys.executable,
+                r"C:\Users\Noah\OneDrive\Documents\bbschatbot1.0\TrumpsLatestPostScraper.py"
+            ]
+            result = subprocess.run(command, capture_output=True, text=True, encoding='utf-8', errors='ignore', timeout=180)
+            output = result.stdout.strip()
+
+            if result.returncode != 0:
+                # If the script returned a non-zero exit code
+                error_msg = result.stderr.strip() or "Unknown error from Trump scraper."
+                return f"Error from Trump post script: {error_msg}"
+
+            # Split the output into lines and get the last two lines
+            lines = output.splitlines()
+            if len(lines) >= 2:
+                return "\n".join(lines[-2:])
+            else:
+                return output
+        except Exception as e:
+            return f"Error running Trump post script: {str(e)}"
+
+    def load_email_credentials(self):
+        """Load email credentials from a file."""
+        if os.path.exists("email_credentials.json"):
+            with open("email_credentials.json", "r") as file:
+                return json.load(file)
+        return {}
+
+    def send_email(self, recipient, subject, body):
+        """Send an email using Gmail."""
+        credentials = self.load_email_credentials()
+        smtp_server = credentials.get("smtp_server", "smtp.gmail.com")
+        smtp_port = credentials.get("smtp_port", 587)
+        sender_email = credentials.get("sender_email")
+        sender_password = credentials.get("sender_password")
+
+        if not sender_email or not sender_password:
+            return "Email credentials are missing."
+
+        try:
+            msg = MIMEText(body)
+            msg["Subject"] = subject
+            msg["From"] = sender_email
+            msg["To"] = recipient
+
+            with smtplib.SMTP(smtp_server, smtp_port) as server:
+                server.ehlo()
+                server.starttls()
+                server.ehlo()
+                server.login(sender_email, sender_password)
+                server.sendmail(sender_email, [recipient], msg.as_string())
+
+            return f"Email sent to {recipient} successfully."
+        except Exception as e:
+            return f"Error sending email: {str(e)}"
+
+    def handle_mail_command(self, command_text):
+        """Handle the !mail command to send an email."""
+        try:
+            parts = shlex.split(command_text)
+            if len(parts) < 4:
+                self.send_full_message("Usage: !mail \"recipient@example.com\" \"Subject\" \"Body\"")
+                return
+
+            recipient = parts[1]
+            subject = parts[2]
+            body = parts[3]
+            response = self.send_email(recipient, subject, body)
+            self.send_full_message(response)
+        except ValueError as e:
+            self.send_full_message(f"Error parsing command: {str(e)}")
+
+    def get_pic_response(self, query):
+        """Fetch a random picture from Pexels based on the query."""
+        key = self.pexels_api_key.get()
+        if not key:
+            return "Pexels API key is missing."
+        elif not query:
+            return "Please specify a query."
+        else:
+            url = "https://api.pexels.com/v1/search"
+            headers = {
+                "Authorization": key
+            }
+            params = {
+                "query": query,
+                "per_page": 1,
+                "page": 1
+            }
             try:
-                loop = asyncio.get_event_loop()
-                if not loop.is_running():
-                    loop.close()
+                r = requests.get(url, headers=headers, params=params, timeout=10)
+                r.raise_for_status()  # Raise an HTTPError for bad responses
+                data = r.json()
+                photos = data.get("photos", [])
+                if not photos:
+                    return f"No pictures found for '{query}'."
+                else:
+                    photo_url = photos[0]["src"]["original"]
+                    return f"Here is a picture of {query}: {photo_url}"
+            except requests.exceptions.RequestException as e:
+                return f"Error fetching picture: {str(e)}"
+
+    def handle_blaz_command(self, call_letters):
+        """Handle the !blaz command to provide the radio station's live broadcast link based on call letters."""
+        radio_links = {
+            "WPBG": "https://playerservices.streamtheworld.com/api/livestream-redirect/WPBGFM.mp3",
+            "WSWT": "https://playerservices.streamtheworld.com/api/livestream-redirect/WSWTFM.mp3",
+            "WMBD": "https://playerservices.streamtheworld.com/api/livestream-redirect/WMBDAM.mp3",
+            "WIRL": "https://playerservices.streamtheworld.com/api/livestream-redirect/WIRLAM.mp3",
+            "WXCL": "https://playerservices.streamtheworld.com/api/livestream-redirect/WXCLFM.mp3",
+            "WKZF": "https://playerservices.streamtheworld.com/api/livestream-redirect/WKZFFM.mp3"
+        }
+        stream_link = radio_links.get(call_letters.upper(), "No matching radio station found.")
+        response = f"Listen to {call_letters.upper()} live: {stream_link}"
+        self.send_full_message(response)
+
+    def handle_radio_command(self, query):
+        """Handle the !radio command to provide an internet radio station link based on the search query."""
+        if not query:
+            response = "Please provide a search query in quotes, e.g., !radio \"classic rock\"."
+        else:
+            # Example implementation using a predefined list of radio stations
+            radio_stations = {
+                "classic rock": "https://www.classicrockradio.com/stream",
+                "jazz": "https://www.jazzradio.com/stream",
+                "pop": "https://www.popradio.com/stream",
+                "news": "https://www.newsradio.com/stream"
+            }
+            station_link = radio_stations.get(query.lower(), "No matching radio station found.")
+            response = f"Radio station for '{query}': {station_link}"
+        self.send_full_message(response)
+
+class BBSBotCLI:
+    def __init__(self, stdscr):
+        self.stdscr = stdscr
+        self.current_line = 0
+        self.buffer_lines = []
+        self.scroll_position = 0  # Add scroll position tracking
+        self.init_screen()
+        self.host = ""
+        self.port = 0
+        self.loop = asyncio.new_event_loop()
+        self.msg_queue = queue.Queue()
+        self.partial_line = ""
+        self.connected = False
+        self.reader = None
+        self.writer = None
+        self.get_input("Command: ")  # Add this line to prompt for input immediately
+
+    def init_screen(self):
+        curses.use_default_colors()
+        curses.start_color()
+        self.stdscr.clear()
+        height, width = self.stdscr.getmaxyx()
+        
+        # Create output window with a border and make it scrollable
+        self.output_win = curses.newwin(height - 3, width, 0, 0)
+        self.input_win = curses.newwin(3, width, height - 3, 0)
+        
+        # Enable scrolling for both windows
+        self.output_win.scrollok(True)
+        self.output_win.idlok(True)
+        self.input_win.scrollok(True)
+        
+        # Enable keypad input for scrolling
+        self.output_win.keypad(True)
+        self.stdscr.keypad(True)
+        
+        self.max_lines = height - 5
+        self.height = height
+        self.width = width
+        
+        # Initialize color pairs
+        self.init_colors()
+        
+        self.refresh_output("CLI interface active. Type 'exit' or 'quit' to leave.")
+        self.get_input("Command: ")  # Add this line to prompt for input immediately
+
+    def init_colors(self):
+        """Initialize color pairs for ANSI colors"""
+        curses.init_pair(1, curses.COLOR_RED, curses.COLOR_BLACK)
+        curses.init_pair(2, curses.COLOR_GREEN, curses.COLOR_BLACK)
+        curses.init_pair(3, curses.COLOR_YELLOW, curses.COLOR_BLACK)
+        curses.init_pair(4, curses.COLOR_BLUE, curses.COLOR_BLACK)
+        curses.init_pair(5, curses.COLOR_MAGENTA, curses.COLOR_BLACK)
+        curses.init_pair(6, curses.COLOR_CYAN, curses.COLOR_BLACK)
+        curses.init_pair(7, curses.COLOR_WHITE, curses.COLOR_BLACK)
+
+    def refresh_output(self, text):
+        """Refresh the output window with buffered content"""
+        # Add new text to buffer
+        if text:
+            new_lines = text.split('\n')
+            self.buffer_lines.extend(new_lines)
+        
+        # Keep buffer size manageable
+        if len(self.buffer_lines) > 1000:
+            self.buffer_lines = self.buffer_lines[-1000:]
+        
+        # Calculate visible area
+        height, width = self.output_win.getmaxyx()
+        start_line = max(0, len(self.buffer_lines) - height + 1 + self.scroll_position)
+        end_line = min(start_line + height - 1, len(self.buffer_lines))
+        
+        # Clear and redraw
+        self.output_win.clear()
+        
+        try:
+            # Display each line in the visible area
+            for i, line in enumerate(self.buffer_lines[start_line:end_line]):
+                y_pos = i
+                # Ensure we don't write beyond window boundaries
+                if y_pos < height:
+                    self.output_win.addstr(y_pos, 0, line[:width-1])
+        except curses.error:
+            pass  # Ignore curses errors from writing at bottom-right corner
+        
+        self.output_win.refresh()
+
+    def process_incoming_messages(self):
+        """Process incoming messages and update display"""
+        while True:
+            try:
+                data = self.msg_queue.get_nowait()
+                if data:
+                    # Split data into lines and add to buffer
+                    new_lines = data.split('\n')
+                    for line in new_lines:
+                        if line.strip():  # Only add non-empty lines
+                            self.buffer_lines.append(line)
+                    
+                    # Auto-scroll to bottom when new data arrives
+                    self.scroll_position = 0
+                    self.refresh_output("")
+            except queue.Empty:
+                time.sleep(0.1)
+            except curses.error:
+                continue
             except Exception as e:
-                print(f"Error closing event loop: {e}")
+                self.buffer_lines.append(f"Error: {str(e)}")
+                self.refresh_output("")
+
+    def get_input(self, prompt):
+        """Get input from user with support for scrolling"""
+        self.input_win.clear()
+        self.input_win.border(0)
+        self.input_win.addstr(1, 1, prompt)
+        self.input_win.refresh()
+        
+        curses.echo()
+        
+        # Handle special keys for scrolling
+        while True:
+            try:
+                key = self.stdscr.getch()
+                if key == curses.KEY_UP:
+                    self.scroll_position = min(self.scroll_position + 1, len(self.buffer_lines) - self.height + 5)
+                    self.refresh_output("")
+                    continue
+                elif key == curses.KEY_DOWN:
+                    self.scroll_position = max(self.scroll_position - 1, 0)
+                    self.refresh_output("")
+                    continue
+                elif key == curses.KEY_PPAGE:  # Page Up
+                    self.scroll_position = min(self.scroll_position + self.height - 5, len(self.buffer_lines) - self.height + 5)
+                    self.refresh_output("")
+                    continue
+                elif key == curses.KEY_NPAGE:  # Page Down
+                    self.scroll_position = max(self.scroll_position - (self.height - 5), 0)
+                    self.refresh_output("")
+                    continue
+                else:
+                    # Normal input handling
+                    self.input_win.clear()
+                    self.input_win.border(0)
+                    self.input_win.addstr(1, 1, prompt)
+                    user_input = self.input_win.getstr(1, len(prompt) + 1).decode("utf-8")
+                    curses.noecho()
+                    return user_input
+            except curses.error:
+                continue
+
+    def run(self):
+        self.host = self.get_input("Enter BBS hostname: ")
+        self.port = int(self.get_input("Enter BBS port: "))
+        self.refresh_output(f"Connecting to {self.host}:{self.port}...")
+        self.start_connection()
+
+        while True:
+            try:
+                cmd = self.get_input("Command: ")
+                self.refresh_output("> " + cmd)
+                if cmd.strip().lower() in ['exit', 'quit']:
+                    break
+                if self.connected and self.writer:
+                    asyncio.run_coroutine_threadsafe(self._send_message(cmd + "\r\n"), self.loop)
+            except KeyboardInterrupt:
+                self.refresh_output("Exiting...")
+                break
+
+    def start_connection(self):
+        """Start the telnetlib3 client in a background thread."""
+        self.stop_event = threading.Event()
+
+        def run_telnet():
+            asyncio.set_event_loop(self.loop)
+            self.loop.run_until_complete(self.telnet_client_task(self.host, self.port))
+
+        thread = threading.Thread(target=run_telnet, daemon=True)
+        thread.start()
+
+        # Start a separate thread to process incoming messages
+        threading.Thread(target=self.process_incoming_messages, daemon=True).start()
+
+    async def telnet_client_task(self, host, port):
+        """Async function connecting via telnetlib3 (CP437 + ANSI), reading bigger chunks."""
+        try:
+            reader, writer = await telnetlib3.open_connection(
+                host=host,
+                port=port,
+                term='ansi',
+                encoding='cp437',
+                cols=136  # Set terminal width to 136 columns
+            )
+        except Exception as e:
+            self.msg_queue.put_nowait(f"Connection failed: {e}\n")
+            return
+
+        self.reader = reader
+        self.writer = writer
+        self.connected = True
+        self.msg_queue.put_nowait(f"Connected to {host}:{port}\n")
+
+        try:
+            while not self.stop_event.is_set():
+                data = await reader.read(4096)
+                if not data:
+                    break
+                self.msg_queue.put_nowait(data)
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            self.msg_queue.put_nowait(f"Error reading from server: {e}\n")
+        finally:
+            await self.disconnect_from_bbs()
+
+    async def disconnect_from_bbs(self):
+        """Stop the background thread and close connections."""
+        if not self.connected:
+            return
+
+        self.stop_event.set()
+        if self.writer:
+            try:
+                self.writer.close()
+                await self.writer.drain()  # Ensure the writer is closed properly
+            except Exception as e:
+                print(f"Error closing writer: {e}")
+
+        self.connected = False
+        self.reader = None
+        self.writer = None
+        self.msg_queue.put_nowait("Disconnected from BBS.\n")
+
+    def display_data(self, data):
+        """Display data with extended ASCII and ANSI parsing."""
+        ansi_escape_regex = re.compile(r'\x1b\[(\d+)(;\d+)*m')
+        clean_data = ansi_escape_regex.sub('', data)  # Strip ANSI codes for now
+        
+        # Split incoming data into lines
+        new_lines = clean_data.split('\n')
+        
+        # Add to our buffer and refresh display
+        for line in new_lines:
+            if line.strip():  # Only add non-empty lines
+                self.buffer_lines.append(line)
+        
+        # Keep buffer at a reasonable size
+        if len(self.buffer_lines) > 1000:
+            self.buffer_lines = self.buffer_lines[-1000:]
+        
+        # Refresh the display
+        height, _ = self.output_win.getmaxyx()
+        display_start = max(0, len(self.buffer_lines) - height + 1)
+        
+        self.output_win.clear()
+        try:
+            for i, line in enumerate(self.buffer_lines[display_start:display_start + height - 1]):
+                self.output_win.addstr(i, 0, line + '\n')
+        except curses.error:
+            pass  # Ignore overflow errors
+        
+        self.output_win.refresh()
+
+    async def _send_message(self, message):
+        """Coroutine to send a message."""
+        self.writer.write(message)
+        await self.writer.drain()
+
+def main_cli(stdscr):
+    curses.start_color()
+    curses.init_pair(1, curses.COLOR_RED, curses.COLOR_BLACK)
+    curses.init_pair(2, curses.COLOR_GREEN, curses.COLOR_BLACK)
+    curses.init_pair(3, curses.COLOR_YELLOW, curses.COLOR_BLACK)
+    curses.init_pair(4, curses.COLOR_BLUE, curses.COLOR_BLACK)
+    curses.init_pair(5, curses.COLOR_MAGENTA, curses.COLOR_BLACK)
+    curses.init_pair(6, curses.COLOR_CYAN, curses.COLOR_BLACK)
+    curses.init_pair(7, curses.COLOR_WHITE, curses.COLOR_BLACK)
+    cli = BBSBotCLI(stdscr)
+    cli.run()
+
+def main():
+    curses.wrapper(main_cli)
 
 if __name__ == "__main__":
     main()

@@ -5,5 +5,4 @@ telnetlib3
 yt-dlp
 pytube
 pydub
-selenium
-beautifulsoup4
+windows-curses
