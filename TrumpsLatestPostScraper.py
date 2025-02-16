@@ -19,9 +19,9 @@ sys.stdout.reconfigure(encoding='utf-8')
 
 def download_truthsocial_page(output_file):
     """
-    1.0️⃣ Downloads the fully rendered HTML of Donald Trump's Truth Social page,
-    using Selenium and Edge. It clicks the “Truths” tab to ensure we
-    see the main feed. Then it waits for the first post to appear.
+    Downloads the fully rendered HTML of Donald Trump's Truth Social page,
+    using Selenium and Edge. It waits for the first post to appear and
+    performs multiple scrolls to ensure content is loaded.
     """
     edge_options = Options()
     edge_service = Service(r"C:\WebDrivers\msedgedriver.exe")
@@ -45,8 +45,13 @@ def download_truthsocial_page(output_file):
         print("Waiting for first post...")
         wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "div[data-testid='status']")))
 
-        # Optional: scroll a bit for more content
-        ActionChains(driver).scroll_by_amount(0, 800).perform()
+        # Multiple scrolls with longer delays
+        print("Scrolling to load more content...")
+        for _ in range(3):
+            ActionChains(driver).scroll_by_amount(0, 500).perform()
+            time.sleep(2)  # Wait 2 seconds between scrolls
+
+        # Final wait to ensure everything is loaded
         time.sleep(3)
 
         print("Retrieving page source...")
@@ -61,26 +66,33 @@ def download_truthsocial_page(output_file):
 
 def get_latest_post(html_file):
     """
-    1.1️⃣ Reads the local HTML file, finds ALL 'div' tags with data-testid='status',
-    and returns the first one that has a <p data-markup="true"> and a <time>.
+    Reads the local HTML file and finds Trump's latest post using the specific HTML structure.
     """
     with open(html_file, 'r', encoding='utf-8') as file:
         content = file.read()
 
     soup = BeautifulSoup(content, 'html.parser')
+    
+    # Find the first status div that contains both the post content and timestamp
+    status_divs = soup.find_all('div', class_='status cursor-pointer focusable')
+    
+    for div in status_divs:
+        # Find the post content paragraph
+        content_p = div.find('p', {'data-markup': 'true'})
+        # Find the timestamp element
+        time_element = div.find('time')
+        
+        if content_p and time_element:
+            # Get the text content and timestamp
+            post_text = content_p.get_text(strip=True)
+            post_time = time_element.get('title')
+            
+            if post_text and post_time:
+                print(f"Debug - Found status div with content")
+                print(f"Debug - Post text: {post_text}")
+                print(f"Debug - Time: {post_time}")
+                return post_text, post_time
 
-    # Grab ALL potential status blocks
-    all_posts = soup.find_all('div', {'data-testid': 'status'})
-    for post in all_posts:
-        p_tag = post.find('p', {'data-markup': 'true'})
-        time_tag = post.find('time')
-        if p_tag and time_tag:
-            # Found a valid post
-            post_content = p_tag.get_text(strip=True)
-            post_time = time_tag.get('title')
-            return post_content, post_time
-
-    # If no post had that structure, fallback:
     return None, None
 
 if __name__ == "__main__":

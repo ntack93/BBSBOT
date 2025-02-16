@@ -8387,3 +8387,24 @@ venv/share/doc/yt_dlp/README.txt
 venv/share/fish/vendor_completions.d/yt-dlp.fish
 venv/share/man/man1/yt-dlp.1
 venv/share/zsh/site-functions/_yt-dlp
+BBSBotCLI.py
+BBSBotCLIStartup.py
+BBSBotCLITmux.py
+cookies.pkl
+last_seen.json
+shared_queue.py
+ui - alpha.html
+ui - alpha.js
+xcreds.json
+__pycache__/BBSBotCLI.cpython-312.pyc
+__pycache__/BBSBotCLITmux.cpython-312.pyc
+__pycache__/shared_queue.cpython-312.pyc
+venv/Lib/site-packages/_curses_panel.cp312-win_amd64.pyd
+venv/Lib/site-packages/_curses.cp312-win_amd64.pyd
+venv/Lib/site-packages/windows_curses-2.4.1.dist-info/INSTALLER
+venv/Lib/site-packages/windows_curses-2.4.1.dist-info/LICENSE
+venv/Lib/site-packages/windows_curses-2.4.1.dist-info/METADATA
+venv/Lib/site-packages/windows_curses-2.4.1.dist-info/RECORD
+venv/Lib/site-packages/windows_curses-2.4.1.dist-info/REQUESTED
+venv/Lib/site-packages/windows_curses-2.4.1.dist-info/top_level.txt
+venv/Lib/site-packages/windows_curses-2.4.1.dist-info/WHEEL
