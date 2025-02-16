@@ -21,7 +21,7 @@ class BBSBotCLI:
         self.connected = False
         self.reader = None
         self.writer = None
-        self.get_input("Command: ")  # Add this line to prompt for input immediately
+        # Remove initial get_input call
 
     def init_screen(self):
         curses.use_default_colors()
@@ -50,7 +50,7 @@ class BBSBotCLI:
         self.init_colors()
         
         self.refresh_output("CLI interface active. Type 'exit' or 'quit' to leave.")
-        self.get_input("Command: ")  # Add this line to prompt for input immediately
+        # Remove initial get_input call
 
     def init_colors(self):
         """Initialize color pairs for ANSI colors"""
@@ -100,6 +100,10 @@ class BBSBotCLI:
             pass  # Ignore curses errors from writing at bottom-right corner
         
         self.output_win.refresh()
+        # Force cursor back to input window after refresh
+        self.input_win.move(1, len("Command: ") + 1)
+        self.input_win.refresh()
+        curses.doupdate()
 
     def process_incoming_messages(self):
         """Process incoming messages and update display"""
@@ -108,67 +112,78 @@ class BBSBotCLI:
                 data = self.msg_queue.get_nowait()
                 if data:
                     self.display_data(data)
+                    # Force cursor back to input window after display
+                    self.input_win.move(1, len("Command: ") + 1)
+                    self.input_win.refresh()
+                    curses.doupdate()
             except queue.Empty:
                 time.sleep(0.1)
             except curses.error:
                 continue
             except Exception as e:
-                self.display_data(f"Error: {str(e)}\n")
+                self.display_data(f"Error: {str(e)}")
+                self.input_win.move(1, len("Command: ") + 1)
+                self.input_win.refresh()
+                curses.doupdate()
 
-    def get_input(self, prompt):
-        """Get input from user with support for scrolling"""
-        self.input_win.clear()
-        self.input_win.border(0)
-        self.input_win.addstr(1, 1, prompt)
-        self.input_win.refresh()
-        
-        curses.echo()
-        
-        # Handle special keys for scrolling
+    def get_input(self, prompt, required=True, is_numeric=False):
+        """Get input from user with validation"""
         while True:
+            self.input_win.clear()
+            self.input_win.border(0)
+            self.input_win.addstr(1, 1, prompt)
+            self.input_win.move(1, len(prompt) + 1)  # Move cursor to input position
+            self.input_win.refresh()
+            curses.doupdate()
+            
+            curses.echo()
             try:
-                key = self.stdscr.getch()
-                if key == curses.KEY_UP:
-                    self.scroll_position = min(self.scroll_position + 1, len(self.buffer_lines) - self.height + 5)
-                    self.refresh_output("")
+                user_input = self.input_win.getstr(1, len(prompt) + 1).decode("utf-8").strip()
+                curses.noecho()
+                
+                if not user_input and required:
                     continue
-                elif key == curses.KEY_DOWN:
-                    self.scroll_position = max(self.scroll_position - 1, 0)
-                    self.refresh_output("")
-                    continue
-                elif key == curses.KEY_PPAGE:  # Page Up
-                    self.scroll_position = min(self.scroll_position + self.height - 5, len(self.buffer_lines) - self.height + 5)
-                    self.refresh_output("")
-                    continue
-                elif key == curses.KEY_NPAGE:  # Page Down
-                    self.scroll_position = max(self.scroll_position - (self.height - 5), 0)
-                    self.refresh_output("")
-                    continue
-                else:
-                    # Normal input handling
-                    self.input_win.clear()
-                    self.input_win.border(0)
-                    self.input_win.addstr(1, 1, prompt)
-                    user_input = self.input_win.getstr(1, len(prompt) + 1).decode("utf-8")
-                    curses.noecho()
-                    return user_input
+                
+                if is_numeric and user_input:
+                    try:
+                        return int(user_input)
+                    except ValueError:
+                        continue
+                
+                return user_input
             except curses.error:
                 continue
 
     def run(self):
-        self.host = self.get_input("Enter BBS hostname: ")
-        self.port = int(self.get_input("Enter BBS port: "))
+        """Main run loop with improved input handling"""
+        # Get connection details with validation
+        while not self.host:
+            self.host = self.get_input("Enter BBS hostname: ", required=True)
+        
+        while not self.port:
+            self.port = self.get_input("Enter BBS port: ", required=True, is_numeric=True)
+
         self.refresh_output(f"Connecting to {self.host}:{self.port}...")
         self.start_connection()
 
         while True:
             try:
-                cmd = self.get_input("Command: ")
-                self.refresh_output("> " + cmd)
+                cmd = self.get_input("Command: ", required=False)
+                if not cmd:  # Handle empty input gracefully
+                    continue
+                    
                 if cmd.strip().lower() in ['exit', 'quit']:
                     break
+                    
+                self.refresh_output("> " + cmd)
                 if self.connected and self.writer:
                     asyncio.run_coroutine_threadsafe(self._send_message(cmd + "\r\n"), self.loop)
+                
+                # Force cursor back to input position
+                self.input_win.move(1, len("Command: ") + 1)
+                self.input_win.refresh()
+                curses.doupdate()
+                
             except KeyboardInterrupt:
                 self.refresh_output("Exiting...")
                 break

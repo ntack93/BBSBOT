@@ -52,37 +52,24 @@ table = dynamodb.Table(table_name)
 
 class BBSBotApp:
     def __init__(self):
+        # Initialize core components
+        self.chat_members = set()
+        self.last_seen = self.load_last_seen()
+        self.public_message_history = {}
+        self.timers = {}
+        self.partial_message = ""
+        self.previous_line = ""
+        self.user_list_buffer = []
+        self.favorites = self.load_favorites()
+        self.msg_queue = queue.Queue()
         
-        self.define_ansi_tags()  # Add this line to define ANSI tags
-
-    def define_ansi_tags(self):
-        """Define text tags for basic ANSI foreground colors (30-37, 90-97)."""
-        self.terminal_display.tag_configure("normal", foreground="white")
-
-        color_map = {
-            '30': 'black',
-            '31': 'red',
-            '32': 'green',
-            '33': 'yellow',
-            '34': 'blue',
-            '35': 'magenta',
-            '36': 'cyan',
-            '37': 'white',
-            '90': 'bright_black',
-            '91': 'bright_red',
-            '92': 'bright_green',
-            '93': 'bright_yellow',
-            '94': 'bright_blue',
-            '95': 'bright_magenta',
-            '96': 'bright_cyan',
-            '97': 'bright_white'
-        }
-        for code, color_name in color_map.items():
-            if color_name.startswith("bright_"):
-                base_color = color_name.split("_", 1)[1]
-                self.terminal_display.tag_configure(color_name, foreground=base_color)
-            else:
-                self.terminal_display.tag_configure(color_name, foreground=color_name)
+        # API client initialization
+        self.openai_client = OpenAI(api_key=DEFAULT_OPENAI_API_KEY)
+        
+        # Initialize DynamoDB clients
+        self.dynamodb_client = boto3.client('dynamodb', region_name='us-east-1')
+        self.table_name = 'ChatBotConversations'
+        self.pending_messages_table_name = 'PendingMessages'
 
     def create_dynamodb_table(self):
         """Create DynamoDB table if it doesn't exist."""
@@ -217,7 +204,6 @@ class BBSBotApp:
 
         thread = threading.Thread(target=run_telnet, daemon=True)
         thread.start()
-        self.append_terminal_text(f"Connecting to {host}:{port}...\n", "normal")
         self.start_keep_alive()  # Start keep-alive coroutine
 
     async def telnet_client_task(self, host, port):
@@ -237,7 +223,6 @@ class BBSBotApp:
         self.reader = reader
         self.writer = writer
         self.connected = True
-        self.connect_button.config(text="Disconnect")
         self.msg_queue.put_nowait(f"Connected to {host}:{port}\n")
 
         try:
@@ -294,21 +279,6 @@ class BBSBotApp:
         self.reader = None
         self.writer = None
 
-        def update_connect_button():
-            try:
-                if self.connect_button and self.connect_button.winfo_exists():
-                    self.connect_button.config(text="Connect")
-            except tk.TclError:
-                pass
-
-        # Schedule the update_connect_button call from the main thread
-        if threading.current_thread() is threading.main_thread():
-            update_connect_button()
-        else:
-            try:
-                self.master.after_idle(update_connect_button)
-            except RuntimeError as e:
-                print(f"Error scheduling update_connect_button: {e}")
         self.msg_queue.put_nowait("Disconnected from BBS.\n")
 
     def process_incoming_messages(self):
@@ -339,7 +309,6 @@ class BBSBotApp:
 
         # Process all but the last entry; that last might be incomplete
         for line in lines[:-1]:
-            self.append_terminal_text(line + "\n", "normal")
             print(f"Incoming line: {line}")  # Log each incoming line
             self.parse_incoming_triggers(line)
 
@@ -515,7 +484,6 @@ class BBSBotApp:
             username = public_trigger_match.group(1)
             message = public_trigger_match.group(2)
             if self.no_spam_mode.get():
-                self.append_terminal_text(f"Ignored public trigger due to No Spam Mode: {message}\n", "normal")
                 return
             if message.startswith("!said"):
                 self.handle_said_command(username, message)
@@ -537,7 +505,6 @@ class BBSBotApp:
         elif re.match(r'Topic: \(.*?\)\.\s*(.*?)\s*are here with you\.', clean_line, re.DOTALL):
             self.update_chat_members(clean_line)
         elif re.match(r'(.+?)@(.+?) \(.*?\) is now online\.  Total users: \d+\.', clean_line):
-            # This line indicates a user logged onto the BBS, not necessarily entered the chatroom
             return
 
         # Check for re-logon automation triggers
@@ -625,7 +592,6 @@ class BBSBotApp:
             else:
                 self.send_private_message(username, 'Usage: !radio "search query"')
         else:
-            # Assume it's a message for the !chat trigger
             response = self.get_chatgpt_response(message, username=username)
 
         self.send_private_message(username, response)
@@ -756,7 +722,6 @@ class BBSBotApp:
         for chunk in chunks:
             full_message = f">{username} {chunk}"
             asyncio.run_coroutine_threadsafe(self._send_message(full_message + "\r\n"), self.loop)
-            self.append_terminal_text(full_message + "\n", "normal")
 
     def get_weather_response(self, args):
         """Fetch weather info and return the response as a string."""
@@ -1040,72 +1005,9 @@ class BBSBotApp:
             "crypto <symbol>, timer <value> <minutes or seconds>, gif <query>, msg <username> <message>, doc <query>, pod <show> <episode>, !trump, nospam.\n"
         )
 
-    def append_terminal_text(self, text, default_tag="normal"):
-        """Append text to the terminal display with ANSI parsing."""
-        self.terminal_display.configure(state=tk.NORMAL)
-        self.parse_ansi_and_insert(text)
-        self.terminal_display.see(tk.END)
-        self.terminal_display.configure(state=tk.DISABLED)
-
-    def parse_ansi_and_insert(self, text_data):
-        """Minimal parser for ANSI color codes (foreground only)."""
-        ansi_escape_regex = re.compile(r'\x1b\[(.*?)m')
-
-        last_end = 0
-        current_tag = "normal"
-
-        for match in ansi_escape_regex.finditer(text_data):
-            start, end = match.span()
-            # Insert text before this ANSI code with current tag
-            if start > last_end:
-                self.terminal_display.insert(tk.END, text_data[last_end:start].replace('& # 3 9 ;', "'"), current_tag)
-
-            code_string = match.group(1)
-            codes = code_string.split(';')
-            if '0' in codes:
-                current_tag = "normal"
-                codes.remove('0')
-
-            for c in codes:
-                mapped_tag = self.map_code_to_tag(c)
-                if mapped_tag:
-                    current_tag = mapped_tag
-
-            last_end = end
-
-        if last_end < len(text_data):
-            self.terminal_display.insert(tk.END, text_data[last_end:].replace('& # 3 9 ;', "'"), current_tag)
-
-    def map_code_to_tag(self, color_code):
-        """Map a numeric color code to a defined Tk text tag."""
-        valid_codes = {
-            '30': 'black',
-            '31': 'red',
-            '32': 'green',
-            '33': 'yellow',
-            '34': 'blue',
-            '35': 'magenta',
-            '36': 'cyan',
-            '37': 'white',
-            '90': 'bright_black',
-            '91': 'bright_red',
-            '92': 'bright_green',
-            '93': 'bright_yellow',
-            '94': 'bright_blue',
-            '95': 'bright_magenta',
-            '96': 'bright_cyan',
-            '97': 'bright_white',
-        }
-        return valid_codes.get(color_code, None)
-
-    def replace_newline_markers(self, text):
-        """Replace /n markers with actual newline characters."""
-        return text.replace("/n", "\n")
-
     def send_message(self, event=None):
         """Send the user's typed message to the BBS."""
         if not self.connected or not self.writer:
-            self.append_terminal_text("Not connected to any BBS.\n", "normal")
             return
 
         user_input = self.input_var.get()
@@ -1117,8 +1019,6 @@ class BBSBotApp:
             prefix = "Gos " if self.mud_mode.get() else ""
             message = prefix + processed_input
             asyncio.run_coroutine_threadsafe(self._send_message(message + "\r\n"), self.loop)
-            self.append_terminal_text(message + "\n", "normal")
-            print(f"Sent to BBS: {message}")
 
     async def _send_message(self, message):
         """Coroutine to send a message."""
@@ -1135,11 +1035,9 @@ class BBSBotApp:
         chunks = self.chunk_message(full_message, 250)  # Use the new chunk_message!
 
         for chunk in chunks:
-            self.append_terminal_text(chunk + "\n", "normal")
             if self.connected and self.writer:
                 asyncio.run_coroutine_threadsafe(self._send_message(chunk + "\r\n"), self.loop)
                 time.sleep(0.1)  # Add a short delay to ensure messages are sent in sequence
-                print(f"Sent to BBS: {chunk}")  # Log chunks sent to BBS
 
     def chunk_message(self, message, chunk_size):
         """
@@ -1182,65 +1080,6 @@ class BBSBotApp:
 
         return final_chunks
 
-    def show_favorites_window(self):
-        """Open a Toplevel window to manage favorite BBS addresses."""
-        if self.favorites_window and self.favorites_window.winfo_exists():
-            self.favorites_window.lift()
-            return
-
-        self.favorites_window = tk.Toplevel(self.master)
-        self.favorites_window.title("Favorite BBS Addresses")
-
-        row_index = 0
-
-        # Listbox to display favorite addresses
-        self.favorites_listbox = tk.Listbox(self.favorites_window, height=10, width=50)
-        self.favorites_listbox.grid(row=row_index, column=0, columnspan=2, padx=5, pady=5)
-        self.update_favorites_listbox()
-
-        row_index += 1
-
-        # Entry to add a new favorite address
-        self.new_favorite_var = tk.StringVar()
-        ttk.Entry(self.favorites_window, textvariable=self.new_favorite_var, width=40).grid(row=row_index, column=0, padx=5, pady=5)
-
-        # Button to add the new favorite address
-        add_button = ttk.Button(self.favorites_window, text="Add", command=self.add_favorite)
-        add_button.grid(row=row_index, column=1, padx=5, pady=5)
-
-        row_index += 1
-
-        # Button to remove the selected favorite address
-        remove_button = ttk.Button(self.favorites_window, text="Remove", command=self.remove_favorite)
-        remove_button.grid(row=row_index, column=0, columnspan=2, pady=5)
-
-        # Bind listbox selection to populate host field
-        self.favorites_listbox.bind("<<ListboxSelect>>", self.populate_host_field)
-
-    def update_favorites_listbox(self):
-        """Update the Listbox with the current favorite addresses."""
-        self.favorites_listbox.delete(0, tk.END)
-        for address in self.favorites:
-            self.favorites_listbox.insert(tk.END, address)
-
-    def add_favorite(self):
-        """Add a new favorite address."""
-        new_address = self.new_favorite_var.get().strip()
-        if new_address and new_address not in self.favorites:
-            self.favorites.append(new_address)
-            self.update_favorites_listbox()
-            self.new_favorite_var.set("")
-            self.save_favorites()
-
-    def remove_favorite(self):
-        """Remove the selected favorite address."""
-        selected_index = self.favorites_listbox.curselection()
-        if selected_index:
-            address = self.favorites_listbox.get(selected_index)
-            self.favorites.remove(address)
-            self.update_favorites_listbox()
-            self.save_favorites()
-
     def load_favorites(self):
         """Load favorite BBS addresses from a file."""
         if os.path.exists("favorites.json"):
@@ -1252,13 +1091,6 @@ class BBSBotApp:
         """Save favorite BBS addresses to a file."""
         with open("favorites.json", "w") as file:
             json.dump(self.favorites, file)
-
-    def populate_host_field(self, event):
-        """Populate the host field with the selected favorite address."""
-        selected_index = self.favorites_listbox.curselection()
-        if selected_index:
-            address = self.favorites_listbox.get(selected_index)
-            self.host.set(address)
 
     def load_nickname(self):
         """Load nickname from a file."""
@@ -1336,7 +1168,6 @@ class BBSBotApp:
 
         # If !nospam is ON, only allow whispered and paging messages.
         if self.no_spam_mode.get() and not (private_message_match or page_message_match):
-            self.append_terminal_text("Ignored trigger due to No Spam Mode.\n", "normal")
             return
 
         # Process private messages
@@ -1477,7 +1308,6 @@ class BBSBotApp:
         for chunk in chunks:
             full_message = f"Whisper to {username} {chunk}"
             asyncio.run_coroutine_threadsafe(self._send_message(full_message + "\r\n"), self.loop)
-            self.append_terminal_text(full_message + "\n", "normal")
 
     
 
@@ -1496,7 +1326,6 @@ class BBSBotApp:
         for chunk in chunks:
             full_message = f"/P {username} {chunk}"
             asyncio.run_coroutine_threadsafe(self._send_message(full_message + "\r\n"), self.loop)
-            self.append_terminal_text(full_message + "\n", "normal")
 
     ########################################################################
     #                           Help
@@ -1786,7 +1615,6 @@ class BBSBotApp:
         """Refresh the membership list by sending an ENTER keystroke and allowing time for processing."""
         self.send_enter_keystroke()
         time.sleep(1)         # Allow BBS lines to arrive
-        self.master.update()  # Let process_incoming_messages() parse them
 
     def get_news_response(self, topic):
         """Fetch top 2 news headlines and return the response as a string."""
@@ -2050,79 +1878,6 @@ class BBSBotApp:
                 response = f"Error fetching GIF: {str(e)}"
 
         self.send_full_message(response)
-
-    def toggle_split_view(self):
-        """Toggle the split view to create multiple bot instances."""
-        if not self.split_view_enabled:
-            self.split_view_enabled = True
-            main_container = self.master.nametowidget('main_frame')
-            main_container.pack_forget()
-
-            split_frame = ttk.Frame(self.master)
-            split_frame.pack(fill=tk.BOTH, expand=True)
-
-            left_frame = ttk.Frame(split_frame)
-            left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-
-            right_frame = ttk.Frame(split_frame)
-            right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
-
-            main_container.pack(in_=left_frame, fill=tk.BOTH, expand=True)
-            clone = self.create_clone(main_container)
-            clone.pack(in_=right_frame, fill=tk.BOTH, expand=True)
-
-            self.split_view_clones.append(clone)
-            print("Split View enabled")
-        else:
-            self.split_view_enabled = False
-            for clone in self.split_view_clones:
-                clone.destroy()
-            self.split_view_clones.clear()
-            main_container = self.master.nametowidget('main_frame')
-            main_container.pack(fill=tk.BOTH, expand=True)
-            print("Split View disabled")
-
-    def create_clone(self, widget):
-        """Create a clone of the given widget."""
-        clone = ttk.Frame(self.master)
-        for child in widget.winfo_children():
-            child_clone = self.clone_widget(child, clone)
-            child_clone.pack()
-        return clone
-
-    def clone_widget(self, widget, parent):
-        """Clone a widget and its configuration."""
-        widget_class = widget.__class__
-        widget_config = {key: val[-1] for key, val in widget.configure().items() if isinstance(val[-1], (str, int, float)) or key in ('text', 'value')}
-        
-        # Handle special cases for configuration values
-        for key, val in widget_config.items():
-            if isinstance(val, str) and val.startswith('-'):
-                widget_config[key] = val[1:]
-            if key in ('borderwidth', 'highlightthickness', 'padx', 'pady'):
-                widget_config[key] = int(val) if val else 0
-            if key == 'font':
-                font_parts = val.split()
-                if len(font_parts) > 1 and font_parts[1].isdigit():
-                    widget_config[key] = (font_parts[0], int(font_parts[1]))
-                else:
-                    widget_config[key] = val
-            if key == 'width' and val == 'borderwidth':
-                widget_config[key] = 1
-
-        # Ensure valid configuration values
-        widget_config = {k: v for k, v in widget_config.items() if v is not None and v != ''}
-
-        # Handle special cases for Text widget
-        if widget_class == tk.Text:
-            widget_clone = widget_class(parent, **widget_config)
-            widget_clone.insert(tk.END, widget.get("1.0", tk.END))
-        else:
-            widget_clone = widget_class(parent, **widget_config)
-
-        for child in widget.winfo_children():
-            self.clone_widget(child, widget_clone)
-        return widget_clone
 
     def handle_msg_command(self, recipient, message, sender):
         """Handle the !msg command to leave a message for another user."""
