@@ -20,6 +20,7 @@ from email.mime.text import MIMEText
 import shlex
 import curses  # <-- UI change: added for CLI interface
 from BBSBotCLITmux import main_cli_tmux  # added import
+from shared_queue import incoming_message_queue, outgoing_message_queue  # Import the shared message queues
 
 # Load API keys from api_keys.json
 def load_api_keys():
@@ -70,6 +71,26 @@ class BBSBotApp:
         self.dynamodb_client = boto3.client('dynamodb', region_name='us-east-1')
         self.table_name = 'ChatBotConversations'
         self.pending_messages_table_name = 'PendingMessages'
+        
+        self.stop_event = threading.Event()
+        self.start_message_processing()
+
+    def start_message_processing(self):
+        """Start a background thread to process incoming messages from the shared queue."""
+        def process_messages():
+            while not self.stop_event.is_set():
+                try:
+                    data = incoming_message_queue.get(timeout=1)
+                    self.process_data_chunk(data)
+                except queue.Empty:
+                    continue
+
+        thread = threading.Thread(target=process_messages, daemon=True)
+        thread.start()
+
+    def stop_message_processing(self):
+        """Stop the background message processing thread."""
+        self.stop_event.set()
 
     def create_dynamodb_table(self):
         """Create DynamoDB table if it doesn't exist."""
@@ -722,6 +743,7 @@ class BBSBotApp:
         for chunk in chunks:
             full_message = f">{username} {chunk}"
             asyncio.run_coroutine_threadsafe(self._send_message(full_message + "\r\n"), self.loop)
+            outgoing_message_queue.put(full_message)
 
     def get_weather_response(self, args):
         """Fetch weather info and return the response as a string."""
@@ -1038,6 +1060,7 @@ class BBSBotApp:
             if self.connected and self.writer:
                 asyncio.run_coroutine_threadsafe(self._send_message(chunk + "\r\n"), self.loop)
                 time.sleep(0.1)  # Add a short delay to ensure messages are sent in sequence
+            outgoing_message_queue.put(full_message)
 
     def chunk_message(self, message, chunk_size):
         """
@@ -1308,6 +1331,7 @@ class BBSBotApp:
         for chunk in chunks:
             full_message = f"Whisper to {username} {chunk}"
             asyncio.run_coroutine_threadsafe(self._send_message(full_message + "\r\n"), self.loop)
+            outgoing_message_queue.put(full_message)
 
     
 
@@ -1326,6 +1350,7 @@ class BBSBotApp:
         for chunk in chunks:
             full_message = f"/P {username} {chunk}"
             asyncio.run_coroutine_threadsafe(self._send_message(full_message + "\r\n"), self.loop)
+            outgoing_message_queue.put(full_message)
 
     ########################################################################
     #                           Help
