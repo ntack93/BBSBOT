@@ -20,7 +20,6 @@ from openai import OpenAI
 import smtplib
 from email.mime.text import MIMEText
 import shlex
-from bs4 import BeautifulSoup
 
 # Load API keys from api_keys.json
 def load_api_keys():
@@ -133,6 +132,7 @@ class BBSBotApp:
         self.pending_messages_table_name = 'PendingMessages'
         self.create_pending_messages_table()
         self.openai_client = OpenAI(api_key=self.openai_api_key.get())
+        self.greeting_sent = {}  # Track if greeting has been sent for each user
 
     def create_dynamodb_table(self):
         """Create DynamoDB table if it doesn't exist."""
@@ -738,6 +738,7 @@ class BBSBotApp:
                     self.user_list_buffer.append(line)
                 self.update_chat_members(self.user_list_buffer)
                 self.user_list_buffer = []
+                self.greeting_sent = {}  # Reset greeting sent flags when user list is updated
 
             # Check for user joining message
             if line.strip() == ":***":
@@ -1009,8 +1010,6 @@ class BBSBotApp:
                 self.handle_radio_command(query)
             else:
                 self.send_private_message(username, 'Usage: !radio "search query"')
-        elif "!musk" in message:
-            response = self.get_musk_post()
         else:
             # Assume it's a message for the !chat trigger
             response = self.get_chatgpt_response(message, username=username)
@@ -1084,8 +1083,6 @@ class BBSBotApp:
                 self.handle_radio_command(query)
             else:
                 self.send_page_response(username, module_or_channel, 'Usage: !radio "search query"')
-        elif "!musk" in message:
-            response = self.get_musk_post()
 
         if response:
             self.send_page_response(username, module_or_channel, response)
@@ -1132,8 +1129,6 @@ class BBSBotApp:
             else:
                 self.send_direct_message(username, 'Usage: !radio "search query"')
                 return
-        elif "!musk" in message:
-            response = self.get_musk_post()
         else:
             response = self.get_chatgpt_response(message, direct=True, username=username)
 
@@ -1707,9 +1702,25 @@ class BBSBotApp:
     #                           Trigger Parsing
     ########################################################################
     def parse_incoming_triggers(self, line):
-        # Remove ANSI codes for easier parsing.
+        # Remove ANSI codes for easier parsing
         ansi_escape_regex = re.compile(r'\x1b\[(.*?)m')
         clean_line = ansi_escape_regex.sub('', line)
+        
+        # Store the "***" marker line
+        if clean_line.strip() == ":***":
+            self.previous_line = ":***"
+            return
+
+        # Single unified join detection logic
+        if self.previous_line == ":***":
+            # Match both formats: "user just joined" and "user@domain just joined"
+            join_match = re.match(r'(.+?)(?:@[^\s]+)? just joined this channel!', clean_line)
+            if join_match:
+                username = join_match.group(1)
+                if self.auto_greeting_enabled:
+                    self.handle_user_greeting(username)
+                self.previous_line = ""  # Reset the previous line
+                return
 
         # Always allow the !nospam command to toggle state
         if "!nospam" in clean_line:
@@ -1765,7 +1776,7 @@ class BBSBotApp:
                     valid_commands = [
                         "!weather", "!yt", "!search", "!chat", "!news", "!map",
                         "!pic", "!polly", "!mp3yt", "!help", "!seen", "!greeting",
-                        "!stocks", "!crypto", "!timer", "!gif", "!msg", "!doc", "!pod", "!said", "!trump", "!mail", "!blaz", "!musk"
+                        "!stocks", "!crypto", "!timer", "!gif", "!msg", "!doc", "!pod", "!said", "!trump", "!mail", "!blaz"
                     ]
                     if not any(message.startswith(cmd) for cmd in valid_commands):
                         return
@@ -1854,9 +1865,6 @@ class BBSBotApp:
                     elif message.startswith("!blaz"):
                         call_letters = message.split("!blaz", 1)[1].strip()
                         self.handle_blaz_command(call_letters)
-                    elif message.startswith("!musk"):
-                        response = self.get_musk_post()
-                        self.send_full_message(response)
 
         # Update the previous line
         self.previous_line = clean_line
@@ -2133,14 +2141,14 @@ class BBSBotApp:
         if not self.auto_greeting_enabled:
             return
 
-        self.send_enter_keystroke()  # Send ENTER keystroke to get the list of users
-        time.sleep(1)  # Wait for the response to be processed
-        current_members = self.chat_members.copy()
         new_member_username = username.split('@')[0]  # Remove the @<bbsaddress> part
-        if new_member_username not in current_members:
-            greeting_message = f"{new_member_username} just came into the chatroom, give them a casual greeting directed at them."
-            response = self.get_chatgpt_response(greeting_message, direct=True, username=new_member_username)
-            self.send_direct_message(new_member_username, response)
+        if new_member_username in self.greeting_sent and self.greeting_sent[new_member_username]:
+            return  # Greeting already sent for this user
+
+        greeting_message = f"{new_member_username} just came into the chatroom, give them a casual greeting directed at them."
+        response = self.get_chatgpt_response(greeting_message, direct=True, username=new_member_username)
+        self.send_direct_message(new_member_username, response)
+        self.greeting_sent[new_member_username] = True  # Mark greeting as sent
 
     def handle_pic_command(self, query):
         """Fetch a random picture from Pexels based on the query."""
@@ -2419,9 +2427,9 @@ class BBSBotApp:
         """Fetch a popular GIF based on the query."""
         key = self.giphy_api_key.get()
         if not key:
-            return "Giphy API key is missing."
+            response = "Giphy API key is missing."
         elif not query:
-            return "Please specify a query."
+            response = "Please specify a query."
         else:
             url = "https://api.giphy.com/v1/gifs/search"
             params = {
@@ -2436,12 +2444,14 @@ class BBSBotApp:
                 data = r.json()
                 gifs = data.get("data", [])
                 if not gifs:
-                    return f"No GIFs found for '{query}'."
+                    response = f"No GIFs found for '{query}'."
                 else:
                     gif_url = gifs[0].get("url", "No URL")
-                    return f"Here is your GIF: {gif_url}"
+                    response = f"GIF for '{query}': {gif_url}"
             except requests.exceptions.RequestException as e:
-                return f"Error fetching GIF: {str(e)}"
+                response = f"Error fetching GIF: {str(e)}"
+
+        self.send_full_message(response)
 
     def toggle_split_view(self):
         """Toggle the split view to create multiple bot instances."""
@@ -2709,8 +2719,6 @@ class BBSBotApp:
         elif "!blaz" in message:
             call_letters = message.split("!blaz", 1)[1].strip()
             self.handle_blaz_command(call_letters)
-        elif "!musk" in message:
-            response = self.get_musk_post()
 
         if response:
             self.send_full_message(response)
@@ -2920,30 +2928,6 @@ class BBSBotApp:
             station_link = radio_stations.get(query.lower(), "No matching radio station found.")
             response = f"Radio station for '{query}': {station_link}"
         self.send_full_message(response)
-
-    def get_musk_post(self):
-        """Run the Musk post scraper script and return the latest post."""
-        try:
-            command = [
-                sys.executable,
-                r"C:\Users\Noah\OneDrive\Documents\bbschatbot1.0\MusksLatestPostScraper.py"
-            ]
-            result = subprocess.run(command, capture_output=True, text=True, encoding='utf-8', errors='ignore', timeout=180)
-            output = result.stdout.strip()
-
-            if result.returncode != 0:
-                # If the script returned a non-zero exit code
-                error_msg = result.stderr.strip() or "Unknown error from Musk scraper."
-                return f"Error from Musk post script: {error_msg}"
-
-            # Split the output into lines and get the last line
-            lines = output.splitlines()
-            if len(lines) >= 1:
-                return lines[-1]
-            else:
-                return output
-        except Exception as e:
-            return f"Error running Musk post script: {str(e)}"
 
 def main():
     app = None  # Ensure app is defined
