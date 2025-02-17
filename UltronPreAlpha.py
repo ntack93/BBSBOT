@@ -2419,7 +2419,7 @@ class BBSBotApp:
         self.send_full_message(f"Timer set for {username} for {value} {unit}.")
 
     def get_gif_response(self, query):
-        """Fetch a popular GIF based on the query."""
+        """Fetch a popular GIF based on the query and return the direct link to the GIF."""
         key = self.giphy_api_key.get()
         if not key:
             return "Giphy API key is missing."
@@ -2434,15 +2434,25 @@ class BBSBotApp:
                 "rating": "g"
             }
             try:
-                r = requests.get(url, params=params, timeout=10)
-                r.raise_for_status()  # Raise an HTTPError for bad responses
+                r = requests.get(url, params=params)
                 data = r.json()
-                gifs = data.get("data", [])
-                if not gifs:
-                    return f"No GIFs found for '{query}'."
+                if not data['data']:
+                    return "No GIFs found for the query."
                 else:
-                    gif_url = gifs[0].get("url", "No URL")
-                    return f"Here is your GIF: {gif_url}"
+                    gif_page_url = data['data'][0]['url']
+                    # Fetch the HTML content of the Giphy page
+                    page_response = requests.get(gif_page_url)
+                    soup = BeautifulSoup(page_response.content, 'html.parser')
+                    # Extract the direct link to the GIF
+                    meta_tag = soup.find('meta', property='og:image')
+                    if meta_tag:
+                        direct_gif_url = meta_tag['content']
+                        # Ensure the link ends with .gif
+                        if direct_gif_url.endswith('.webp'):
+                            direct_gif_url = direct_gif_url.replace('.webp', '.gif')
+                        return direct_gif_url
+                    else:
+                        return "Could not extract the direct GIF link."
             except requests.exceptions.RequestException as e:
                 return f"Error fetching GIF: {str(e)}"
 
