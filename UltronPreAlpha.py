@@ -132,7 +132,7 @@ class BBSBotApp:
         self.auto_greeting_enabled = False  # Default auto-greeting to off
         self.pending_messages_table_name = 'PendingMessages'
         self.create_pending_messages_table()
-        self.openai_client = OpenAI(api_key=self.openai_api_key.get())
+        openai.api_key = self.openai_api_key.get()
 
     def create_dynamodb_table(self):
         """Create DynamoDB table if it doesn't exist."""
@@ -504,7 +504,7 @@ class BBSBotApp:
     def save_settings(self, window):
         """Called when user clicks 'Save' in the settings window."""
         self.update_display_font()
-        self.openai_client = OpenAI(api_key=self.openai_api_key.get())
+        openai.api_key = self.openai_api_key.get()
         # Save new API keys
         self.save_api_keys()
         window.destroy()
@@ -1299,8 +1299,8 @@ class BBSBotApp:
 
     def get_chatgpt_response(self, user_text, direct=False, username=None):
         """Send user_text to ChatGPT and return the response as a string."""
-        if not self.openai_client:
-            return "OpenAI client is not initialized."
+        if not openai.api_key:
+            return "OpenAI API key is not set."
 
         # Fetch the latest chat members from DynamoDB
         self.chat_members = set(self.get_chat_members())
@@ -1363,14 +1363,14 @@ class BBSBotApp:
         print(f"[DEBUG] Chunks sent to ChatGPT: {messages}")  # Log chunks sent to ChatGPT
 
         try:
-            completion = self.openai_client.chat.completions.create(
+            completion = openai.ChatCompletion.create(
                 model="gpt-4o-mini",
-                n=1,
-                max_tokens=500,  # Allow for longer responses
-                temperature=0.2,  # Set temperature to 0.2
-                messages=messages
+                messages=messages,
+                max_tokens=500,
+                temperature=0.2,
+                n=1
             )
-            gpt_response = completion.choices[0].message.content
+            gpt_response = completion.choices[0].message['content']
 
             if username:
                 self.save_conversation(username, user_text, gpt_response)
@@ -2607,8 +2607,8 @@ class BBSBotApp:
 
     def get_chatgpt_document_response(self, prompt):
         """Send a prompt to ChatGPT and return the full response as a string."""
-        if not self.openai_client:
-            return "OpenAI client is not initialized."
+        if not openai.api_key:
+            return "OpenAI API key is not set."
 
         messages = [
             {"role": "system", "content": "You are a writer of detailed, verbose documents."},
@@ -2616,14 +2616,14 @@ class BBSBotApp:
         ]
 
         try:
-            completion = self.openai_client.chat.completions.create(
+            completion = openai.ChatCompletion.create(
                 model="gpt-4o-mini",
-                n=1,
-                max_tokens=10000,  # Allow for longer responses
-                temperature=0.2,  # Set temperature
-                messages=messages
+                messages=messages,
+                max_tokens=10000,
+                temperature=0.2,
+                n=1
             )
-            gpt_response = completion.choices[0].message.content
+            gpt_response = completion.choices[0].message['content']
         except Exception as e:
             gpt_response = f"Error with ChatGPT API: {str(e)}"
 
